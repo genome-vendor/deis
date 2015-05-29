@@ -3,11 +3,11 @@ description: Loadbalanced Deis cluster
 parameters:
   image:
     type: string
-    default: CoreOS-675.0.0
+    default: CoreOS-647.2.0
     description: CoreOS Image Name
   key:
     type: string
-    default: apipe-deis
+    default: deis-key
     description: Name of Key Pair for instances
   flavor:
     type: string
@@ -15,7 +15,7 @@ parameters:
     description: Name of Flavor for instances
   size:
     type: number
-    default: 5
+    default: 3
     description: Number of instances
   external_network:
     type: string
@@ -23,11 +23,11 @@ parameters:
     description: UUID or Name of external network
   network:
     type: string
-    default: apipe-network
+    default: deis-network
     description: UUID or Name of private network
   subnet:
     type: string
-    default: apipe-subnet
+    default: deis-subnet
     description: UUID or Name of private subnet
 
 resources:
@@ -47,7 +47,7 @@ resources:
           subnet: {get_param: subnet}
           pool_id: {get_resource: pool}
           metadata: {}
-          user_data: {get_file: /gscuser/mkiwala/Projects/ostack-juno-test/deis/contrib/coreos/user-data}
+          user_data: {get_file: contrib/coreos/user-data}
   monitor:
     type: OS::Neutron::HealthMonitor
     properties:
