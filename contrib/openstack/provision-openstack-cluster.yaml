@@ -1,0 +1,89 @@
+heat_template_version: 2014-10-16
+description: Loadbalanced Deis cluster
+parameters:
+  image:
+    type: string
+    default: CoreOS-675.0.0
+    description: CoreOS Image Name
+  key:
+    type: string
+    default: apipe-deis
+    description: Name of Key Pair for instances
+  flavor:
+    type: string
+    default: m1.large
+    description: Name of Flavor for instances
+  size:
+    type: number
+    default: 5
+    description: Number of instances
+  external_network:
+    type: string
+    default: external
+    description: UUID or Name of external network
+  network:
+    type: string
+    default: apipe-network
+    description: UUID or Name of private network
+  subnet:
+    type: string
+    default: apipe-subnet
+    description: UUID or Name of private subnet
+
+resources:
+  asg:
+    type: OS::Heat::AutoScalingGroup
+    properties:
+      min_size: {get_param: size}
+      max_size: {get_param: size}
+      resource:
+        type: lb_server.yaml
+        properties:
+          image: {get_param: image}
+          key_name: {get_param: key}
+          flavor: {get_param: flavor}
+          external_network: {get_param: external_network}
+          network: {get_param: network}
+          subnet: {get_param: subnet}
+          pool_id: {get_resource: pool}
+          metadata: {}
+          user_data: {get_file: /gscuser/mkiwala/Projects/ostack-juno-test/deis/contrib/coreos/user-data}
+  monitor:
+    type: OS::Neutron::HealthMonitor
+    properties:
+      type: TCP
+      delay: 5
+      max_retries: 5
+      timeout: 5
+  pool:
+    type: OS::Neutron::Pool
+    properties:
+      protocol: HTTP
+      monitors: [{get_resource: monitor}]
+      subnet: {get_param: subnet}
+      lb_method: ROUND_ROBIN
+      vip:
+        protocol_port: 80
+  lb:
+    type: OS::Neutron::LoadBalancer
+    properties:
+      protocol_port: 80
+      pool_id: {get_resource: pool}
+  lb_floating:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: {get_param: external_network}
+      port_id: {get_attr: [pool, vip, port_id]}
+
+outputs:
+  pool_ip_address:
+    value: {get_attr: [pool, vip, address]}
+    description: The IP address of the load balancing pool
+  website_url:
+    value:
+      str_replace:
+        template: http://host/
+        params:
+          host: { get_attr: [lb_floating, floating_ip_address] }
+    description: >
+      This URL is the "external" URL
