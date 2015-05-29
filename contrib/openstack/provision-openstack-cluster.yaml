@@ -31,12 +31,11 @@ parameters:
     description: UUID or Name of private subnet
 
 resources:
-  asg:
-    type: OS::Heat::AutoScalingGroup
+  deis_cluster:
+    type: OS::Heat::ResourceGroup
     properties:
-      min_size: {get_param: size}
-      max_size: {get_param: size}
-      resource:
+      count: {get_param: size}
+      resource_def:
         type: lb_server.yaml
         properties:
           image: {get_param: image}
