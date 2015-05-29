@@ -75,13 +75,8 @@ resources:
 
 outputs:
   pool_ip_address:
+    description: The IP address of the load balancer
     value: {get_attr: [pool, vip, address]}
-    description: The IP address of the load balancing pool
-  website_url:
-    value:
-      str_replace:
-        template: http://host/
-        params:
-          host: { get_attr: [lb_floating, floating_ip_address] }
-    description: >
-      This URL is the "external" URL
+  deis_cluster_floating_ips:
+    description: The IP addresses of the cluster members
+    value: {get_attr: [deis_cluster, server_floating_ip]}
