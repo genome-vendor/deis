@@ -45,7 +45,7 @@ resources:
           network: {get_param: network}
           subnet: {get_param: subnet}
           pool_id: {get_resource: pool}
-          user_data: {get_file: contrib/coreos/user-data}
+          user_data: {get_file: ../coreos/user-data}
   monitor:
     type: OS::Neutron::HealthMonitor
     properties:
