@@ -21,6 +21,12 @@ parameters:
   network:
     type: string
     description: Network used by the server
+  subnet:
+    type: string
+    description: Network used by the server
+  external_network:
+    type: string
+    description: External Network used by the server
 
 resources:
   server:
@@ -32,18 +38,32 @@ resources:
       metadata: {get_param: metadata}
       user_data: {get_param: user_data}
       user_data_format: RAW
-      networks: [{network: {get_param: network} }]
+      networks:
+        - port: { get_resource: server_port }
   member:
     type: OS::Neutron::PoolMember
     properties:
       pool_id: {get_param: pool_id}
       address: {get_attr: [server, first_address]}
       protocol_port: 80
-
+  server_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: network }
+      fixed_ips:
+        - subnet: { get_param: subnet }
+  floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: { get_param: external_network }
+      port_id: { get_resource: server_port }
 outputs:
   server_ip:
     description: IP Address of the load-balanced server.
     value: { get_attr: [server, first_address] }
+  server_floating_ip:
+    description: Floating IP Address of the load-balanced server.
+    value: { get_attr: [floating_ip, floating_ip_address] }
   lb_member:
     description: LB member details.
     value: { get_attr: [member, show] }
