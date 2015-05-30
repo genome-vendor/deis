@@ -53,6 +53,7 @@ resources:
       delay: 5
       max_retries: 5
       timeout: 5
+      url_path: /health-check
   pool:
     type: OS::Neutron::Pool
     properties:
