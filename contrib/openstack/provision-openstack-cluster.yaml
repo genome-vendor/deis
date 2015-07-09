@@ -46,7 +46,7 @@ resources:
           subnet: {get_param: subnet}
           pool_id: {get_resource: pool}
           user_data: {get_file: ../coreos/user-data}
-  monitor:
+  http_monitor:
     type: OS::Neutron::HealthMonitor
     properties:
       type: HTTP
@@ -54,30 +54,59 @@ resources:
       max_retries: 5
       timeout: 5
       url_path: /health-check
-  pool:
+  http_pool:
     type: OS::Neutron::Pool
     properties:
       protocol: HTTP
-      monitors: [{get_resource: monitor}]
+      monitors: [{get_resource: http_monitor}]
       subnet: {get_param: subnet}
       lb_method: ROUND_ROBIN
       vip:
         protocol_port: 80
-  lb:
+  http_lb:
     type: OS::Neutron::LoadBalancer
     properties:
       protocol_port: 80
-      pool_id: {get_resource: pool}
-  lb_floating:
+      pool_id: {get_resource: http_pool}
+  http_lb_floating:
     type: OS::Neutron::FloatingIP
     properties:
       floating_network: {get_param: external_network}
-      port_id: {get_attr: [pool, vip, port_id]}
+      port_id: {get_attr: [http_pool, vip, port_id]}
+  git_ssh_monitor:
+    type: OS::Neutron::HealthMonitor
+    properties:
+      type: TCP
+      delay: 5
+      max_retries: 5
+      timeout: 5
+  git_ssh_pool:
+    type: OS::Neutron::Pool
+    properties:
+      protocol: SSH
+      monitors: [{get_resource: git_ssh_monitor}]
+      subnet: {get_param: subnet}
+      lb_method: ROUND_ROBIN
+      vip:
+        protocol_port: 80
+  git_ssh_lb:
+    type: OS::Neutron::LoadBalancer
+    properties:
+      protocol_port: 80
+      pool_id: {get_resource: git_ssh_pool}
+  git_ssh_lb_floating:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: {get_param: external_network}
+      port_id: {get_attr: [git_ssh_pool, vip, port_id]}
 
 outputs:
-  deis_lb_ip:
+  http_lb_ip:
     description: The IP address of the load balancer
-    value: {get_attr: [lb_floating, floating_ip_address]}
+    value: {get_attr: [http_lb_floating, floating_ip_address]}
+  git_ssh_lb_ip:
+    description: The IP address of the load balancer
+    value: {get_attr: [git_ssh_lb_floating, floating_ip_address]}
   deis_cluster_floating_ips:
     description: The IP addresses of the cluster members
     value: {get_attr: [deis_cluster, server_floating_ip]}
