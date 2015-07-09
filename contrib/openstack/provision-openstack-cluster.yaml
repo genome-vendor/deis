@@ -36,7 +36,7 @@ resources:
     properties:
       count: {get_param: size}
       resource_def:
-        type: lb_server.yaml
+        type: https://raw.githubusercontent.com/openstack/heat-templates/791daca9104b9f55d840d2155e6e996ca7af5f4d/hot/lb_server.yaml
         properties:
           image: {get_param: image}
           key_name: {get_param: key}
@@ -45,6 +45,7 @@ resources:
           network: {get_param: network}
           subnet: {get_param: subnet}
           pool_id: {get_resource: pool}
+          metadata: {}
           user_data: {get_file: ../coreos/user-data}
   monitor:
     type: OS::Neutron::HealthMonitor
