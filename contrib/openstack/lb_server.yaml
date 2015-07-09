@@ -10,9 +10,10 @@ parameters:
   flavor:
     type: string
     description: flavor used by the servers
-  pool_id:
+  http_pool_id:
     type: string
-    description: Pool to contact
+  git_ssh_pool_id:
+    type: string
   user_data:
     type: string
     description: Server user_data
@@ -25,6 +26,10 @@ parameters:
   external_network:
     type: string
     description: External Network used by the server
+  http_port:
+    type: number
+  git_ssh_port:
+    type: number
 
 resources:
   server:
@@ -37,12 +42,18 @@ resources:
       user_data_format: RAW
       networks:
         - port: { get_resource: server_port }
-  member:
+  http_pool_member:
     type: OS::Neutron::PoolMember
     properties:
-      pool_id: {get_param: pool_id}
+      pool_id: {get_param: http_pool_id}
       address: {get_attr: [server, first_address]}
-      protocol_port: 80
+      protocol_port: {get_param: http_port}
+  git_ssh_pool_member:
+    type: OS::Neutron::PoolMember
+    properties:
+      pool_id: {get_param: git_ssh_pool_id}
+      address: {get_attr: [server, first_address]}
+      protocol_port: {get_param: git_ssh_port}
   server_port:
     type: OS::Neutron::Port
     properties:
