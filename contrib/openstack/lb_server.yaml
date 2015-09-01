@@ -74,4 +74,4 @@ outputs:
     value: { get_attr: [floating_ip, floating_ip_address] }
   lb_member:
     description: LB member details.
-    value: { get_attr: [member, show] }
+    value: { get_attr: [http_pool_member, show] }
