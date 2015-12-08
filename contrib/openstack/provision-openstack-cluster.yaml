@@ -21,6 +21,9 @@ parameters:
     type: string
     default: external
     description: UUID or Name of external network
+  http_floating_ip:
+    type: string
+    description: Floating IP address to use for http load balancer
   network:
     type: string
     default: deis-network
@@ -81,6 +84,7 @@ resources:
     type: OS::Neutron::FloatingIP
     properties:
       floating_network: {get_param: external_network}
+      floating_ip_address: {get_param: http_floating_ip}
       port_id: {get_attr: [http_pool, vip, port_id]}
   git_ssh_monitor:
     type: OS::Neutron::HealthMonitor
