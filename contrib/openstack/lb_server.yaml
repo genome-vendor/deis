@@ -1,15 +1,18 @@
 heat_template_version: 2013-05-23
-description: A load-balancer server
+description: A load-balanced server
 parameters:
+  name:
+    type: string
+    description: Name used for server
   image:
     type: string
-    description: Image used for servers
+    description: Image used for server
   key_name:
     type: string
-    description: SSH key to connect to the servers
+    description: SSH key to connect to the server
   flavor:
     type: string
-    description: flavor used by the servers
+    description: flavor used by the server
   http_pool_id:
     type: string
   git_ssh_pool_id:
@@ -30,11 +33,15 @@ parameters:
     type: number
   git_ssh_port:
     type: number
+  metadata:
+    type: json
 
 resources:
   server:
     type: OS::Nova::Server
     properties:
+      name: {get_param: name}
+      metadata: {get_param: metadata}
       flavor: {get_param: flavor}
       image: {get_param: image}
       key_name: {get_param: key_name}
@@ -65,6 +72,7 @@ resources:
     properties:
       floating_network: { get_param: external_network }
       port_id: { get_resource: server_port }
+
 outputs:
   server_ip:
     description: IP Address of the load-balanced server.
