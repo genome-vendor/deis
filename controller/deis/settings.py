@@ -5,6 +5,7 @@ Django settings for the Deis project.
 from __future__ import unicode_literals
 import os.path
 import random
+import semantic_version as semver
 import string
 import sys
 import tempfile
@@ -152,6 +153,7 @@ INSTALLED_APPS = (
     'corsheaders',
     # Deis apps
     'api',
+    'registry',
     'web',
 )
 
@@ -178,8 +180,12 @@ CORS_ALLOW_HEADERS = (
 )
 
 CORS_EXPOSE_HEADERS = (
-    'X_DEIS_API_VERSION',
-    'X_DEIS_PLATFORM_VERSION',
+    'X_DEIS_API_VERSION',  # DEPRECATED
+    'X_DEIS_PLATFORM_VERSION',  # DEPRECATED
+    'X-Deis-Release',  # DEPRECATED
+    'DEIS_API_VERSION',
+    'DEIS_PLATFORM_VERSION',
+    'Deis-Release',
 )
 
 REST_FRAMEWORK = {
@@ -195,6 +201,7 @@ REST_FRAMEWORK = {
         'rest_framework.renderers.JSONRenderer',
     ),
     'PAGINATE_BY': 100,
+    'PAGINATE_BY_PARAM': 'page_size',
     'TEST_REQUEST_DEFAULT_FORMAT': 'json',
 }
 
@@ -267,6 +274,11 @@ LOGGING = {
             'level': 'INFO',
             'propagate': True,
         },
+        'registry': {
+            'handlers': ['console', 'mail_admins', 'rsyslog'],
+            'level': 'INFO',
+            'propagate': True,
+        },
     }
 }
 TEST_RUNNER = 'api.tests.SilentDjangoTestSuiteRunner'
@@ -275,13 +287,15 @@ TEST_RUNNER = 'api.tests.SilentDjangoTestSuiteRunner'
 ETCD_HOST, ETCD_PORT = os.environ.get('ETCD', '127.0.0.1:4001').split(',')[0].split(':')
 
 # default deis settings
-DEIS_LOG_DIR = os.path.abspath(os.path.join(__file__, '..', '..', 'logs'))
 LOG_LINES = 1000
 TEMPDIR = tempfile.mkdtemp(prefix='deis')
 DEIS_DOMAIN = 'deisapp.local'
 
 # standard datetime format used for logging, model timestamps, etc.
 DEIS_DATETIME_FORMAT = '%Y-%m-%dT%H:%M:%S%Z'
+
+# names which apps cannot reserve for routing
+DEIS_RESERVED_NAMES = ['deis']
 
 # default scheduler settings
 SCHEDULER_MODULE = 'scheduler.mock'
@@ -295,10 +309,13 @@ SECRET_KEY = os.environ.get('DEIS_SECRET_KEY', 'CHANGEME_sapm$s%upvsw5l_zuy_&29r
 BUILDER_KEY = os.environ.get('DEIS_BUILDER_KEY', 'CHANGEME_sapm$s%upvsw5l_zuy_&29rkywd^78ff(qi')
 
 # registry settings
-REGISTRY_MODULE = 'registry.mock'
 REGISTRY_URL = 'http://localhost:5000'
 REGISTRY_HOST = 'localhost'
 REGISTRY_PORT = 5000
+
+# logger settings
+LOGGER_HOST = 'localhost'
+LOGGER_PORT = 8088
 
 # check if we can register users with `deis register`
 REGISTRATION_ENABLED = True
@@ -355,6 +372,17 @@ except ImportError:
 if os.path.exists('/templates/confd_settings.py'):
     sys.path.append('/templates')
     from confd_settings import *  # noqa
+
+# Disable swap when mem limits are set, unless Docker is too old
+DISABLE_SWAP = '--memory-swap=-1'
+try:
+    version = 'unknown'
+    from registry.dockerclient import DockerClient
+    version = DockerClient().client.version().get('Version')
+    if not semver.validate(version) or semver.Version(version) < semver.Version('1.5.0'):
+        DISABLE_SWAP = ''
+except:
+    print("Not disabling --memory-swap for Docker version {}".format(version))
 
 # LDAP Backend Configuration
 # Should be always after the confd_settings import.

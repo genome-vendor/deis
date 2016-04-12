@@ -284,3 +284,46 @@ This can be achieved by making a request to the etcd API. See `remove machines`_
 .. _`remove machines`: https://coreos.com/docs/distributed-configuration/etcd-api/#remove-machines
 .. _`removing monitors`: http://ceph.com/docs/hammer/rados/operations/add-or-rm-mons/#removing-monitors
 .. _`removing OSDs`: http://docs.ceph.com/docs/hammer/rados/operations/add-or-rm-osds/#removing-osds-manual
+
+Automatic Host Removal
+======================
+
+The ``contrib/coreos/user-data.example`` provides 2 units, ``graceful-etcd-shutdown.service`` and
+``graceful-ceph-shutdown.service``, that contain some experimental logic to clean-up a Deis node's
+cluster membership before reboot, shutdown or halt events. The units can be used independently or
+together.
+
+The ``graceful-etcd-shutdown`` unit is useful for any Deis node running its own etcd. To be used, it
+must be enabled and started.
+
+.. code-block:: console
+
+    root@deis-1:/# systemctl enable graceful-etcd-shutdown
+    root@deis-1:/# systemctl start graceful-etcd-shutdown
+
+The ``graceful-ceph-shutdown`` script is only useful for nodes running deis-store components. To be used,
+the unit requires that the optional ``deis-store-admin`` component is installed.
+
+.. code-block:: console
+
+    root@deis-1:/# deisctl install store-admin
+    root@deis-1:/# deisctl start store-admin
+
+Then the unit should be enabled and started.
+
+.. code-block:: console
+
+    root@deis-1:/# systemctl enable graceful-ceph-shutdown
+    root@deis-1:/# systemctl start graceful-ceph-shutdown
+
+At this point your node is ready to be gracefully removed whenever a halt, shutdown or reboot event occurs.
+The graceful shutdown units insert themselves ahead of the etcd and Ceph units in the shutdown order. This
+allows them to perform preemptive actions on etcd and Ceph while they are still healthy and in the cluster.
+
+The units make use of the script ``/opt/bin/graceful-shutdown.sh`` to remove the node from the cluster. For
+Ceph, this means determining if the Ceph cluster is healthy and has enough nodes to return to health - if it
+does, it will remove its OSD and wait for the Ceph cluster to return to health. Once it is healthy, it will
+remove its monitor and continue to shut down Ceph components. The end result should be a Ceph cluster that
+returns its status as ``health_ok``.
+
+For etcd, the script remove its etcd member and delete itself from the CoreOS discovery url.

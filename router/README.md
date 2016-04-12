@@ -3,7 +3,7 @@
 An nginx proxy for use in the [Deis](http://deis.io) open source PaaS.
 
 This Docker image is based on the official
-[ubuntu-debootstrap:14.04](https://registry.hub.docker.com/_/ubuntu/) image.
+[alpine:3.2](https://registry.hub.docker.com/_/alpine/) image.
 
 Please add any [issues](https://github.com/deis/deis/issues) you find with this software to
 the [Deis Project](https://github.com/deis/deis).
@@ -34,8 +34,8 @@ The rules included are from this project [doxi-rules](https://bitbucket.org/lazy
 
 Only these modules are enabled:
 
-|--|--|
-|File| |
+|File|Purpose|
+|----|-------|
 |web_app.rules       |detect exploit/misuse-attempts againts web-applications
 |web_server.rules    |generic rules to protect a webserver from misconfiguration and known mistakes / exploit-vectors
 |active-mode.rules   |rules to configure active-mode (block)

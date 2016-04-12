@@ -8,7 +8,7 @@ GOVET = $(GO) vet
 
 SELF_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
 DOCKER_HOST = $(shell echo $$DOCKER_HOST)
-REGISTRY = $(shell echo $$DEV_REGISTRY)
+REGISTRY = $(shell if [ "$$DEV_REGISTRY" == "registry.hub.docker.com" ]; then echo; else echo $$DEV_REGISTRY/; fi)
 GIT_SHA = $(shell git rev-parse --short HEAD)
 
 ifndef IMAGE_PREFIX
@@ -25,6 +25,10 @@ endif
 
 ifndef DEIS_NUM_INSTANCES
   DEIS_NUM_INSTANCES = 3
+endif
+
+ifneq ($(DEIS_STATELESS), True)
+  STORE_IF_STATEFUL = store
 endif
 
 define echo_cyan
@@ -53,11 +57,10 @@ check-deisctl:
 	fi
 
 define check-static-binary
-  if file $(1) | grep -q "statically linked"; then \
+  if file $(1) | egrep -q "(statically linked|Mach-O)"; then \
     echo -n ""; \
   else \
     echo "The binary file $(1) is not statically linked. Build canceled"; \
     exit 1; \
   fi
 endef
-

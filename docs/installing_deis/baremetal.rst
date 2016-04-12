@@ -8,16 +8,10 @@ Bare Metal
 
 Deis clusters can be provisioned anywhere `CoreOS`_ can, including on your own hardware.
 
-Please :ref:`get the source <get_the_source>` and refer to the scripts in `contrib/bare-metal`_
-while following this documentation.
+Please :ref:`get the source <get_the_source>` while following this documentation.
 
 To get CoreOS running on raw hardware, you can boot with `PXE`_ or `iPXE`_ - this will boot a CoreOS
 machine running entirely from RAM. Then, you can `install CoreOS to disk`_.
-
-.. important::
-
-    Deis runs on CoreOS version 494.5.0 or later in the Stable channel.
-
 
 Check System Requirements
 -------------------------
@@ -56,7 +50,7 @@ Add the public key part for the SSH key generated in the first step to the user-
 Update $private_ipv4
 ^^^^^^^^^^^^^^^^^^^^
 
-`CoreOS`_ on bare metal doesn't detect the ``$private_ipv4`` reliably. Replace all occurences in
+`CoreOS`_ on bare metal doesn't detect the ``$private_ipv4`` reliably. Replace all occurrences in
 the user-data with the (private) IP address of the node.
 
 
@@ -100,12 +94,12 @@ Start the installation
 
 .. code-block:: console
 
-    coreos-install -C stable -c /tmp/config -d /dev/sda
+    coreos-install -C stable -c /tmp/config -d /dev/sda -V 899.13.0
 
 
-This will install the latest `CoreOS`_ stable release to disk. The Deis provision scripts for other
-platforms typically specify a CoreOS version - currently, ``633.1.0``. To specify a CoreOS
-version, append the ``-V`` parameter to the install command, e.g. ``-V 633.1.0``.
+This will install the latest `CoreOS`_ stable release that has been known to work
+well with Deis. The Deis team tests each new stable release for Deis compatibility,
+and it is generally not recommended to use a newer, untested release.
 
 After the installation has finished, reboot your server. Once your machine is back up, you should
 be able to log in as the `core` user using the `deis` ssh key.
@@ -159,7 +153,6 @@ disk. Add the following block to the ``write_files`` section:
           options single-request
 
 
-.. _`contrib/bare-metal`: https://github.com/deis/deis/tree/master/contrib/bare-metal
 .. _`cluster size`: https://github.com/coreos/etcd/blob/master/Documentation/optimal-cluster-size.md
 .. _`CoreOS`: https://coreos.com/
 .. _`install CoreOS to disk`: https://coreos.com/docs/running-coreos/bare-metal/installing-to-disk/

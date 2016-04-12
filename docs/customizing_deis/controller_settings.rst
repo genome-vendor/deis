@@ -9,7 +9,7 @@ The following settings are tunable for the :ref:`controller` component.
 
 Dependencies
 ------------
-Requires: :ref:`cache <cache_settings>`, :ref:`database <database_settings>`, :ref:`registry <registry_settings>`
+Requires: :ref:`database <database_settings>`, :ref:`registry <registry_settings>`
 
 Required by: :ref:`router <router_settings>`
 
@@ -30,6 +30,7 @@ setting                                  description
 /deis/controller/unitHostname            See `Unit hostname`_. (default: "default")
 /deis/builder/users/*                    stores user SSH keys (used by builder)
 /deis/domains/*                          domain configuration for applications (used by router)
+/deis/logs/host                          IP address of the host running logger
 =============================            =================================================================================
 
 Settings used by controller
@@ -40,11 +41,9 @@ The following etcd keys are used by the controller component.
 setting                                   description
 ====================================      ======================================================
 /deis/controller/registrationMode         set registration to "enabled", "disabled", or "admin_only" (default: "enabled")
-/deis/controller/schedulerModule          scheduler backend (default: "fleet")
+/deis/controller/subdomain                subdomain used by the router for API requests (default: "deis")
 /deis/controller/webEnabled               enable controller web UI (default: 0)
 /deis/controller/workers                  number of web worker processes (default: CPU cores * 2 + 1)
-/deis/cache/host                          host of the cache component (set by cache)
-/deis/cache/port                          port of the cache component (set by cache)
 /deis/database/host                       host of the database component (set by database)
 /deis/database/port                       port of the database component (set by database)
 /deis/database/engine                     database engine (set by database)
@@ -109,9 +108,33 @@ server
     every application or scaling them down and up.
     The change is only detected when a container unit is deployed.
 
+Changing the Registration Mode
+------------------------------
+
+By default, anybody can register a user with the Deis controller.
+However, this is often undesirable from a security point of view.
+
+Deis supports configuring the registration mode through the ``registrationMode`` setting.
+
+Registration Modes
+^^^^^^^^^^^^^^^^^^
+========== =========================================================
+mode       description
+========== =========================================================
+enabled    Default. Anybody can register a user with the controller.
+disabled   Nobody can register a user with the controller.
+admin_only Only admins can register a user with the controller.
+========== =========================================================
+
+This will set the registration mode to admin_only.
+
+.. code-block:: console
+
+    $ deisctl config controller set registrationMode="admin_only"
+
 Using a LDAP Auth
 -----------------
-Deis Controller supports Single Sign On access control, for now Deis is able to authenticate using LDAP or Active Directory.
+The Deis controller supports Single Sign On access control, for now Deis is able to authenticate using LDAP or Active Directory.
 
 Settings used by LDAP
 ^^^^^^^^^^^^^^^^^^^^^

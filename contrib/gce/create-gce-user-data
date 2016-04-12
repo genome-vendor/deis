@@ -56,20 +56,25 @@ def main():
     gce_template = get_file("gce-user-data-template")
     coreos_template = get_file("../coreos/user-data.example")
 
-    configuration_coreos_template = yaml.safe_load(coreos_template)
+    coreos_template_w_url = None
+    with open(coreos_template.name, 'r') as file:
+        coreos_template_w_url = file.read()
+
+    coreos_template_w_url = coreos_template_w_url.replace('#DISCOVERY_URL', url)
+
+    configuration_coreos_template = yaml.safe_load(coreos_template_w_url)
     configuration_gce_template = yaml.safe_load(gce_template)
 
     configuration = combine_dicts(configuration_coreos_template,
                                   configuration_gce_template)
 
-    configuration["coreos"]["etcd"]["discovery"] = url
+    dump = yaml.dump(configuration, default_flow_style=False,
+                     default_style='|')
+    dump = dump.replace('#DISCOVERY_URL', url)
 
     with gce_user_data as outfile:
         try:
-            outfile.write("#cloud-config\n\n" +
-                          yaml.safe_dump(configuration,
-                                         default_flow_style=False,
-                                         default_style='|'))
+            outfile.write("#cloud-config\n\n" + dump)
         except (IOError, ValueError):
             print "There was an issue writing to file " + gce_user_data.name
             return 1

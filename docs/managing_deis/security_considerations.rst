@@ -40,13 +40,13 @@ Users of Deis often want to deploy their applications to separate environments
 the goal, but rather segregation of application environments - if a development app goes haywire,
 it shouldn't affect production applications that are running in the cluster.
 
-In Deis, deployed applications can be segregated by using the ```deis tags``` command. This
+In Deis, deployed applications can be segregated by using the ``deis tags`` command. This
 enables you to tag machines in your cluster with arbitrary metadata, then configure your applications
 to be scheduled to machines which match the metadata.
 
-For example, if some machines in your cluster are tagged with ```environment=production``` and some
-with ```environment=staging```, you can configure an application to be deployed to the production
-environment by using ```deis tags set environment=production```. Deis will pass this configuration
+For example, if some machines in your cluster are tagged with ``environment=production`` and some
+with ``environment=staging``, you can configure an application to be deployed to the production
+environment by using ``deis tags set environment=production``. Deis will pass this configuration
 along to the scheduler, and your applications in different environments on running on separate
 hardware.
 
@@ -80,6 +80,24 @@ Router firewall
 The :ref:`Router` component includes a firewall to help thwart attacks. It can be enabled by running:
 ``deisctl config router set firewall/enabled=true``. For more information, see the `router README`_
 and :ref:`router_settings`.
+
+IP Whitelist
+------------
+You can enforce cluster-wide IP whitelisting by running ``deisctl config router set enforceWhitelist=true``.
+Then you'll have to manually whitelist IPs to the applications using the config endpoint of the deis
+client. The format is ``{IP_or_CIDR}:{Optional_label},...``. For example:
+
+.. code-block:: console
+
+    $ deis config:set -a your-app DEIS_WHITELIST="10.0.1.0/24:office_ABC,212.121.212.121:client_YXZ"
+
+The format is the same for the controller whitelist but you need to specify the list directly into
+ectd. For example:
+
+.. code-block:: console
+
+    $ deisctl config router set controller/whitelist="10.0.1.0/24:office_intranet,121.212.121.212:dev_jenkins"
+
 
 .. _`#986`: https://github.com/deis/deis/issues/986
 .. _`contrib/util/custom-firewall.sh`: https://github.com/deis/deis/blob/master/contrib/util/custom-firewall.sh

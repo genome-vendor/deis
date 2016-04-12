@@ -26,30 +26,11 @@ port 80 on all nodes in the Deis cluster. The health check endpoint returns an H
 the load balancer to serve traffic to whichever hosts happen to be running the deis-router component
 at any moment.
 
-EC2
+AWS
 ===
 
-The Deis provisioning scripts for EC2 automatically create an Elastic Load Balancer for your Deis
+The Deis provisioning scripts for AWS automatically create an Elastic Load Balancer for your Deis
 cluster.
-
-Rackspace
-=========
-
-You'll need to create two load balancers on Rackspace, as follows:
-
-.. code-block:: text
-
-    Load Balancer 1
-      Port 80
-      Protocol HTTP
-    Health Monitoring -
-      Monitor Type HTTP
-      HTTP Path /health-check
-
-    Load Balancer 2
-      Virtual IP Shared VIP on Another Load Balancer (select Load Balancer 1)
-      Port 2222
-      Protocol TCP
 
 Google Compute Engine
 =====================

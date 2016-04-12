@@ -3,15 +3,12 @@ SECRET_KEY = '{{ getv "/deis/controller/secretKey" }}'
 BUILDER_KEY = '{{ getv "/deis/controller/builderKey" }}'
 
 # scheduler settings
-SCHEDULER_MODULE = 'scheduler.{{ if exists "/deis/controller/schedulerModule" }}{{ getv "/deis/controller/schedulerModule" }}{{ else }}fleet{{ end }}'
-SCHEDULER_TARGET = '{{ if exists "/deis/controller/schedulerTarget" }}{{ getv "/deis/controller/schedulerTarget" }}{{ else }}/var/run/fleet.sock{{ end }}'
+SCHEDULER_MODULE = 'scheduler.fleet'
+SCHEDULER_TARGET = '/var/run/fleet.sock'
 try:
     SCHEDULER_OPTIONS = dict('{{ if exists "/deis/controller/schedulerOptions" }}{{ getv "/deis/controller/schedulerOptions" }}{{ else }}{}{{ end }}')
 except:
     SCHEDULER_OPTIONS = {}
-
-# scheduler swarm manager host
-SWARM_HOST = '{{ if exists "/deis/scheduler/swarm/host" }}{{ getv "/deis/scheduler/swarm/host" }}{{ else }}127.0.0.1{{ end }}'
 
 # base64-encoded SSH private key to facilitate current version of "deis run"
 SSH_PRIVATE_KEY = """{{ if exists "/deis/platform/sshPrivateKey" }}{{ getv "/deis/platform/sshPrivateKey" }}{{ else }}""{{end}}"""
@@ -19,8 +16,9 @@ SSH_PRIVATE_KEY = """{{ if exists "/deis/platform/sshPrivateKey" }}{{ getv "/dei
 # platform domain must be provided
 DEIS_DOMAIN = '{{ getv "/deis/platform/domain" }}'
 
+ENABLE_PLACEMENT_OPTIONS = """{{ if exists "/deis/platform/enablePlacementOptions" }}{{ getv "/deis/platform/enablePlacementOptions" }}{{ else }}false{{end}}"""
+
 # use the private registry module
-REGISTRY_MODULE = 'registry.private'
 REGISTRY_URL = '{{ getv "/deis/registry/protocol" }}://{{ getv "/deis/registry/host" }}:{{ getv "/deis/registry/port" }}'  # noqa
 REGISTRY_HOST = '{{ getv "/deis/registry/host" }}'
 REGISTRY_PORT = '{{ getv "/deis/registry/port" }}'
@@ -37,8 +35,7 @@ DATABASES = {
     }
 }
 
-# move log directory out of /app/deis
-DEIS_LOG_DIR = '/data/logs'
+LOGGER_HOST = '{{ getv "/deis/logs/host"}}'
 
 {{ if exists "/deis/controller/registrationMode" }}
 REGISTRATION_MODE = '{{ getv "/deis/controller/registrationMode" }}'
@@ -48,6 +45,10 @@ REGISTRATION_MODE = '{{ getv "/deis/controller/registrationMode" }}'
 WEB_ENABLED = bool({{ getv "/deis/controller/webEnabled" }})
 {{ end }}
 UNIT_HOSTNAME = '{{ if exists "/deis/controller/unitHostname" }}{{ getv "/deis/controller/unitHostname" }}{{ else }}default{{ end }}'
+
+{{ if exists "/deis/controller/subdomain" }}
+DEIS_RESERVED_NAMES = ['{{ getv "/deis/controller/subdomain" }}']
+{{ end }}
 
 # AUTH
 # LDAP

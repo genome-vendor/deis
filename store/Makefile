@@ -4,15 +4,15 @@ TEMPLATE_IMAGES=admin daemon gateway metadata monitor
 BUILT_IMAGES=base $(TEMPLATE_IMAGES)
 
 ADMIN_IMAGE = $(IMAGE_PREFIX)store-admin:$(BUILD_TAG)
-ADMIN_DEV_IMAGE = $(DEV_REGISTRY)/$(ADMIN_IMAGE)
+ADMIN_DEV_IMAGE = $(REGISTRY)$(ADMIN_IMAGE)
 DAEMON_IMAGE = $(IMAGE_PREFIX)store-daemon:$(BUILD_TAG)
-DAEMON_DEV_IMAGE = $(DEV_REGISTRY)/$(DAEMON_IMAGE)
+DAEMON_DEV_IMAGE = $(REGISTRY)$(DAEMON_IMAGE)
 GATEWAY_IMAGE = $(IMAGE_PREFIX)store-gateway:$(BUILD_TAG)
-GATEWAY_DEV_IMAGE = $(DEV_REGISTRY)/$(GATEWAY_IMAGE)
+GATEWAY_DEV_IMAGE = $(REGISTRY)$(GATEWAY_IMAGE)
 METADATA_IMAGE = $(IMAGE_PREFIX)store-metadata:$(BUILD_TAG)
-METADATA_DEV_IMAGE = $(DEV_REGISTRY)/$(METADATA_IMAGE)
+METADATA_DEV_IMAGE = $(REGISTRY)$(METADATA_IMAGE)
 MONITOR_IMAGE = $(IMAGE_PREFIX)store-monitor:$(BUILD_TAG)
-MONITOR_DEV_IMAGE = $(DEV_REGISTRY)/$(MONITOR_IMAGE)
+MONITOR_DEV_IMAGE = $(REGISTRY)$(MONITOR_IMAGE)
 
 build: check-docker
 	@# Build base as normal
@@ -100,7 +100,7 @@ deploy: build dev-release restart
 test: test-style test-unit test-functional
 
 test-functional:
-	@docker history deis/test-etcd >/dev/null 2>&1 || docker pull deis/test-etcd:latest
+	@$(MAKE) -C ../tests/ test-etcd
 	GOPATH=`cd ../tests/ && godep path`:$(GOPATH) go test -v ./tests/...
 
 test-style:

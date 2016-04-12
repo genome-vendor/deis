@@ -22,13 +22,13 @@ information on how to get set up with CoreOS.
     quick-start
     system-requirements
     aws
-    azure
+    baremetal
     digitalocean
     gce
-    rackspace
-    vagrant
-    baremetal
+    linode
+    azure
     openstack
+    vagrant
     install-deisctl
     install-platform
 

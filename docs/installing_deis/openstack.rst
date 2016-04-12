@@ -68,10 +68,6 @@ Upload a CoreOS image to Glance
 
 You need to have a relatively recent CoreOS image.
 
-.. important::
-
-    Deis runs on CoreOS version 494.5.0 or later in the Stable channel.
-
 If you don't already have a suitable CoreOS image and your OpenStack install allows you to upload
 your own images, the following snippet will use the latest CoreOS image from the stable channel:
 
@@ -95,9 +91,7 @@ Generate a New Discovery URL
 Choose number of instances
 --------------------------
 
-For scheduling to work properly, clusters must consist of at least 3 nodes and always have an odd
-number of members. Please refer to :ref:`system-requirements` for more information about cluster
-size requirements.
+A Deis cluster must have 3 or more nodes. See :ref:`cluster-size` for more details.
 
 Instruct the provision script to launch the desired number of nodes:
 

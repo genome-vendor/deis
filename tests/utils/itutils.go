@@ -15,12 +15,16 @@ import (
 	"testing"
 	"text/template"
 	"time"
-
-	"github.com/ThomasRooney/gexpect"
 )
 
 // Deis points to the CLI used to run tests.
-var Deis = "deis "
+var Deis = os.Getenv("DEIS_BINARY") + " "
+
+func init() {
+	if Deis == " " {
+		Deis = "deis "
+	}
+}
 
 // DeisTestConfig allows tests to be repeated against different
 // targets, with different example apps, using specific credentials, and so on.
@@ -32,6 +36,8 @@ type DeisTestConfig struct {
 	ClusterName        string
 	UserName           string
 	Password           string
+	NewPassword        string
+	NewOwner           string
 	Email              string
 	ExampleApp         string
 	AppDomain          string
@@ -59,7 +65,7 @@ func GetGlobalConfig() *DeisTestConfig {
 	}
 	domain := os.Getenv("DEIS_TEST_DOMAIN")
 	if domain == "" {
-		domain = "local.deisapp.com"
+		domain = "local3.deisapp.com"
 	}
 	sshKey := os.Getenv("DEIS_TEST_SSH_KEY")
 	if sshKey == "" {
@@ -117,12 +123,17 @@ func GetGlobalConfig() *DeisTestConfig {
 	return &envCfg
 }
 
-func doCurl(url string) ([]byte, error) {
+// HTTPClient returns a client for use with the integration tests.
+func HTTPClient() *http.Client {
 	// disable security check for self-signed certificates
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}
-	client := &http.Client{Transport: tr}
+	return &http.Client{Transport: tr}
+}
+
+func doCurl(url string) ([]byte, error) {
+	client := HTTPClient()
 	response, err := client.Get(url)
 	if err != nil {
 		return nil, err
@@ -184,38 +195,6 @@ func CurlWithFail(t *testing.T, url string, failFlag bool, expect string) {
 			fmt.Println(string(body))
 		}
 	}
-}
-
-// AuthPasswd tests whether `deis auth:passwd` updates a user's password.
-func AuthPasswd(t *testing.T, params *DeisTestConfig, password string) {
-	fmt.Println("deis auth:passwd")
-	child, err := gexpect.Spawn(Deis + " auth:passwd")
-	if err != nil {
-		t.Fatalf("command not started\n%v", err)
-	}
-	fmt.Println("current password:")
-	err = child.Expect("current password: ")
-	if err != nil {
-		t.Fatalf("expect password failed\n%v", err)
-	}
-	child.SendLine(params.Password)
-	fmt.Println("new password:")
-	err = child.Expect("new password: ")
-	if err != nil {
-		t.Fatalf("expect password failed\n%v", err)
-	}
-	child.SendLine(password)
-	fmt.Println("new password (confirm):")
-	err = child.Expect("new password (confirm): ")
-	if err != nil {
-		t.Fatalf("expect password failed\n%v", err)
-	}
-	child.SendLine(password)
-	err = child.Expect("Password change succeeded")
-	if err != nil {
-		t.Fatalf("command executiuon failed\n%v", err)
-	}
-	child.Close()
 }
 
 // CheckList executes a command and optionally tests whether its output does
@@ -284,16 +263,22 @@ func Execute(t *testing.T, cmd string, params interface{}, failFlag bool, expect
 			}
 		}
 	case false:
-		if _, _, err := RunCommandWithStdoutStderr(cmdl); err != nil {
+		stdout, stderr, err := RunCommandWithStdoutStderr(cmdl)
+		if err != nil {
 			t.Fatal(err)
-		} else {
-			fmt.Println("ok")
 		}
+
+		if containsWarning(stdout.String()) || containsWarning(stderr.String()) {
+			t.Fatal("Warning found in output, aborting")
+		}
+
+		fmt.Println("ok")
 	}
 }
 
 // AppsDestroyTest destroys a Deis app and checks that it was successful.
 func AppsDestroyTest(t *testing.T, params *DeisTestConfig) {
+	fmt.Printf("destroying app %s...\n", params.ExampleApp)
 	cmd := "apps:destroy --app={{.AppName}} --confirm={{.AppName}}"
 	if err := Chdir(params.ExampleApp); err != nil {
 		t.Fatal(err)
@@ -326,4 +311,12 @@ func GetRandomApp() string {
 		"example-dockerfile-http",
 	}
 	return apps[rand.Intn(len(apps))]
+}
+
+func containsWarning(out string) bool {
+	if strings.Contains(out, "WARNING") {
+		return true
+	}
+
+	return false
 }

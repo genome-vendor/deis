@@ -2,6 +2,7 @@
 # # vi: set ft=ruby :
 
 require 'fileutils'
+require 'open3'
 
 Vagrant.require_version ">= 1.6.5"
 
@@ -11,11 +12,24 @@ end
 
 CLOUD_CONFIG_PATH = File.join(File.dirname(__FILE__), "contrib", "coreos", "user-data")
 CONFIG = File.join(File.dirname(__FILE__), "config.rb")
+CONTRIB_UTILS_PATH = File.join(File.dirname(__FILE__), "contrib", "utils.sh")
+
+# Make variables from contrib/utils.sh accessible
+if File.exists?(CONTRIB_UTILS_PATH)
+  cu_vars = Hash.new do |hash, key|
+    stdin, stdout, stderr = Open3.popen3("/usr/bin/env", "bash", "-c", "source '#{CONTRIB_UTILS_PATH}' && echo $#{key}")
+    value = stdout.gets.chomp
+    hash[key] = value unless value.empty?
+  end
+else
+  raise Vagrant::Errors::VagrantError.new, "The file '#{CONTRIB_UTILS_PATH}' is missing."
+end
 
 # Defaults for config options defined in CONFIG
 $num_instances = 1
 $instance_name_prefix = "deis"
-$update_channel = ENV["COREOS_CHANNEL"] || "stable"
+$update_channel = cu_vars["COREOS_CHANNEL"]
+$image_version = cu_vars["COREOS_VERSION"]
 $enable_serial_logging = false
 $share_home = false
 $vm_gui = false
@@ -56,12 +70,14 @@ Vagrant.configure("2") do |config|
   config.ssh.insert_key = false
 
   config.vm.box = "coreos-%s" % $update_channel
-  config.vm.box_version = ">= 633.1.0"
-  config.vm.box_url = "http://%s.release.core-os.net/amd64-usr/current/coreos_production_vagrant.json" % $update_channel
+  if $image_version != "current"
+      config.vm.box_version = $image_version
+  end
+  config.vm.box_url = "http://%s.release.core-os.net/amd64-usr/%s/coreos_production_vagrant.json" % [$update_channel, $image_version]
 
   ["vmware_fusion", "vmware_workstation"].each do |vmware|
     config.vm.provider vmware do |v, override|
-      override.vm.box_url = "http://%s.release.core-os.net/amd64-usr/current/coreos_production_vagrant_vmware_fusion.json" % $update_channel
+      override.vm.box_url = "http://%s.release.core-os.net/amd64-usr/%s/coreos_production_vagrant_vmware_fusion.json" % [$update_channel, $image_version]
     end
   end
 
@@ -78,7 +94,11 @@ Vagrant.configure("2") do |config|
   end
 
   config.trigger.before :up do
-    if !File.exists?(CLOUD_CONFIG_PATH) || File.readlines(CLOUD_CONFIG_PATH).grep(/#\s*discovery:/).any?
+    if File.exists?(CLOUD_CONFIG_PATH) && !File.readlines(CLOUD_CONFIG_PATH).grep(/\s*discovery #DISCOVERY_URL/).any?
+      user_data = File.read(CLOUD_CONFIG_PATH)
+      new_userdata = user_data.gsub("coreos:", "coreos:\n  flannel:\n    interface: $public_ipv4")
+      File.open(CLOUD_CONFIG_PATH, "w") {|file| file.puts new_userdata }
+    else
       raise Vagrant::Errors::VagrantError.new, "Run 'make discovery-url' first to create user-data."
     end
   end
@@ -133,6 +153,12 @@ Vagrant.configure("2") do |config|
 
       ip = "172.17.8.#{i+99}"
       config.vm.network :private_network, ip: ip
+
+      # Use the same nameserver as the host machine in order to avoid the "too many redirects" problem.
+      config.vm.provider :virtualbox do |vb|
+        vb.customize ["modifyvm", :id, "--natdnshostresolver1", "off"]
+        vb.customize ["modifyvm", :id, "--natdnsproxy1", "off"]
+      end
 
       # Uncomment below to enable NFS for sharing the host machine into the coreos-vagrant VM.
       #config.vm.synced_folder ".", "/home/core/share", id: "core", :nfs => true, :mount_options => ['nolock,vers=3,udp']

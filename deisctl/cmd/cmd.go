@@ -1,135 +1,114 @@
 package cmd
 
 import (
-	"errors"
+	"bytes"
 	"fmt"
-	"io/ioutil"
-	"net/http"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/deis/deis/deisctl/backend"
 	"github.com/deis/deis/deisctl/config"
+	"github.com/deis/deis/deisctl/units"
 	"github.com/deis/deis/deisctl/utils"
-
-	docopt "github.com/docopt/docopt-go"
+	"github.com/deis/deis/deisctl/utils/net"
 )
 
 const (
 	// PlatformCommand is shorthand for "all the Deis components."
 	PlatformCommand string = "platform"
-	swarm           string = "swarm"
+	// StatelessPlatformCommand is shorthand for the components except store-* and database.
+	StatelessPlatformCommand string = "stateless-platform"
+	// DefaultRouterMeshSize defines the default number of routers to be loaded when installing the platform.
+	DefaultRouterMeshSize uint8 = 3
 )
 
 // ListUnits prints a list of installed units.
-func ListUnits(argv []string, b backend.Backend) error {
-	usage := `Prints a list of installed units.
-
-Usage:
-  deisctl list [options]
-`
-	// parse command-line arguments
-	if _, err := docopt.Parse(usage, argv, true, "", false); err != nil {
-		return err
-	}
+func ListUnits(b backend.Backend) error {
 	return b.ListUnits()
 }
 
-// ListUnitFiles prints the contents of all defined unit files.
-func ListUnitFiles(argv []string, b backend.Backend) error {
-	err := b.ListUnitFiles()
-	return err
+// ListMachines prints a list of current hosts.
+func ListMachines(b backend.Backend) error {
+	return b.ListMachines()
 }
+
+// ListUnitFiles prints the contents of all defined unit files.
+func ListUnitFiles(b backend.Backend) error {
+	return b.ListUnitFiles()
+}
+
+// Location to write standard output. By default, this is the os.Stdout.
+var Stdout io.Writer = os.Stdout
+
+// Location to write standard error information. By default, this is the os.Stderr.
+var Stderr io.Writer = os.Stderr
+
+// Number of routers to be installed. By default, it's DefaultRouterMeshSize.
+var RouterMeshSize = DefaultRouterMeshSize
 
 // Scale grows or shrinks the number of running components.
 // Currently "router", "registry" and "store-gateway" are the only types that can be scaled.
-func Scale(argv []string, b backend.Backend) error {
-	usage := `Grows or shrinks the number of running components.
-
-Currently "router", "registry" and "store-gateway" are the only types that can be scaled.
-
-Usage:
-  deisctl scale [<target>...] [options]
-`
-	// parse command-line arguments
-	args, err := docopt.Parse(usage, argv, true, "", false)
-	if err != nil {
-		return err
-	}
-	targets := args["<target>"].([]string)
-
-	outchan := make(chan string)
-	errchan := make(chan error)
+func Scale(targets []string, b backend.Backend) error {
 	var wg sync.WaitGroup
-
-	go printState(outchan, errchan, 500*time.Millisecond)
 
 	for _, target := range targets {
 		component, num, err := splitScaleTarget(target)
 		if err != nil {
 			return err
 		}
-		// the router is the only component that can scale at the moment
+		// the router, registry, and store-gateway are the only component that can scale at the moment
 		if !strings.Contains(component, "router") && !strings.Contains(component, "registry") && !strings.Contains(component, "store-gateway") {
-			return fmt.Errorf("cannot scale %s components", component)
+			return fmt.Errorf("cannot scale %s component", component)
 		}
-		b.Scale(component, num, &wg, outchan, errchan)
+		b.Scale(component, num, &wg, Stdout, Stderr)
 		wg.Wait()
 	}
-	close(outchan)
 	return nil
 }
 
 // Start activates the specified components.
-func Start(argv []string, b backend.Backend) error {
-	usage := `Activates the specified components.
-
-Usage:
-  deisctl start [<target>...] [options]
-`
-	// parse command-line arguments
-	args, err := docopt.Parse(usage, argv, true, "", false)
-	if err != nil {
-		return err
-	}
+func Start(targets []string, b backend.Backend) error {
 
 	// if target is platform, install all services
-	targets := args["<target>"].([]string)
-
 	if len(targets) == 1 {
-		if targets[0] == PlatformCommand {
-			return StartPlatform(b)
-		}
-		if targets[0] == swarm {
-			return StartSwarm(b)
+		switch targets[0] {
+		case PlatformCommand:
+			return StartPlatform(b, false)
+		case StatelessPlatformCommand:
+			return StartPlatform(b, true)
 		}
 	}
-	outchan := make(chan string)
-	errchan := make(chan error)
 	var wg sync.WaitGroup
 
-	go printState(outchan, errchan, 500*time.Millisecond)
-
-	b.Start(targets, &wg, outchan, errchan)
+	b.Start(targets, &wg, Stdout, Stderr)
 	wg.Wait()
-	close(outchan)
 
 	return nil
 }
 
-// checkRequiredKeys exist in etcd
-func checkRequiredKeys() error {
-	if err := config.CheckConfig("/deis/platform/", "domain"); err != nil {
+// RollingRestart restart instance unit in a rolling manner
+func RollingRestart(target string, b backend.Backend) error {
+	var wg sync.WaitGroup
+
+	b.RollingRestart(target, &wg, Stdout, Stderr)
+	wg.Wait()
+
+	return nil
+}
+
+// CheckRequiredKeys exist in config backend
+func CheckRequiredKeys(cb config.Backend) error {
+	if err := config.CheckConfig("/deis/platform/", "domain", cb); err != nil {
 		return fmt.Errorf(`Missing platform domain, use:
 deisctl config platform set domain=<your-domain>`)
 	}
 
-	if err := config.CheckConfig("/deis/platform/", "sshPrivateKey"); err != nil {
+	if err := config.CheckConfig("/deis/platform/", "sshPrivateKey", cb); err != nil {
 		fmt.Printf(`Warning: Missing sshPrivateKey, "deis run" will be unavailable. Use:
 deisctl config platform set sshPrivateKey=<path-to-key>
 `)
@@ -137,156 +116,141 @@ deisctl config platform set sshPrivateKey=<path-to-key>
 	return nil
 }
 
-func startDefaultServices(b backend.Backend, wg *sync.WaitGroup, outchan chan string, errchan chan error) {
+func startDefaultServices(b backend.Backend, stateless bool, wg *sync.WaitGroup, out, err io.Writer) {
 
-	// create separate channels for background tasks
-	_outchan := make(chan string)
-	_errchan := make(chan error)
-	var _wg sync.WaitGroup
+	// Wait for groups to come up.
+	// If we're running in stateless mode, we start only a subset of services.
+	if !stateless {
+		fmt.Fprintln(out, "Storage subsystem...")
+		b.Start([]string{"store-monitor"}, wg, out, err)
+		wg.Wait()
+		b.Start([]string{"store-daemon"}, wg, out, err)
+		wg.Wait()
+		b.Start([]string{"store-metadata"}, wg, out, err)
+		wg.Wait()
 
-	// wait for groups to come up
-	outchan <- fmt.Sprintf("Storage subsystem...")
-	b.Start([]string{"store-monitor"}, wg, outchan, errchan)
-	wg.Wait()
-	b.Start([]string{"store-daemon"}, wg, outchan, errchan)
-	wg.Wait()
-	b.Start([]string{"store-metadata"}, wg, outchan, errchan)
-	wg.Wait()
-
-	// we start gateway first to give metadata time to come up for volume
-	b.Start([]string{"store-gateway@*"}, wg, outchan, errchan)
-	wg.Wait()
-	b.Start([]string{"store-volume"}, wg, outchan, errchan)
-	wg.Wait()
+		// we start gateway first to give metadata time to come up for volume
+		b.Start([]string{"store-gateway@*"}, wg, out, err)
+		wg.Wait()
+		b.Start([]string{"store-volume"}, wg, out, err)
+		wg.Wait()
+	}
 
 	// start logging subsystem first to collect logs from other components
-	outchan <- fmt.Sprintf("Logging subsystem...")
-	b.Start([]string{"logger"}, wg, outchan, errchan)
+	fmt.Fprintln(out, "Logging subsystem...")
+	b.Start([]string{"logger"}, wg, out, err)
 	wg.Wait()
-	b.Start([]string{"logspout"}, wg, outchan, errchan)
+	b.Start([]string{"logspout"}, wg, out, err)
 	wg.Wait()
 
-	b.Start([]string{
+	// Start these in parallel. This section can probably be removed now.
+	var bgwg sync.WaitGroup
+	var trash bytes.Buffer
+	batch := []string{
 		"database", "registry@*", "controller", "builder",
-		"publisher", "router@*"},
-		&_wg, _outchan, _errchan)
+		"publisher", "router@*",
+	}
+	if stateless {
+		batch = []string{"registry@*", "controller", "builder", "publisher", "router@*"}
+	}
+	b.Start(batch, &bgwg, &trash, &trash)
+	// End background stuff.
 
-	outchan <- fmt.Sprintf("Control plane...")
-	b.Start([]string{"database", "registry@*", "controller"}, wg, outchan, errchan)
-	wg.Wait()
-	b.Start([]string{"builder"}, wg, outchan, errchan)
-	wg.Wait()
-
-	outchan <- fmt.Sprintf("Data plane...")
-	b.Start([]string{"publisher"}, wg, outchan, errchan)
+	fmt.Fprintln(Stdout, "Control plane...")
+	batch = []string{"database", "registry@*", "controller"}
+	if stateless {
+		batch = []string{"registry@*", "controller"}
+	}
+	b.Start(batch, wg, out, err)
 	wg.Wait()
 
-	outchan <- fmt.Sprintf("Routing mesh...")
-	b.Start([]string{"router@*"}, wg, outchan, errchan)
+	b.Start([]string{"builder"}, wg, out, err)
+	wg.Wait()
+
+	fmt.Fprintln(out, "Data plane...")
+	b.Start([]string{"publisher"}, wg, out, err)
+	wg.Wait()
+
+	fmt.Fprintln(out, "Router mesh...")
+	b.Start([]string{"router@*"}, wg, out, err)
 	wg.Wait()
 }
 
 // Stop deactivates the specified components.
-func Stop(argv []string, b backend.Backend) error {
-	usage := `Deactivates the specified components.
-
-Usage:
-  deisctl stop [<target>...] [options]
-`
-	// parse command-line arguments
-	args, err := docopt.Parse(usage, argv, true, "", false)
-	if err != nil {
-		return err
-	}
-	targets := args["<target>"].([]string)
+func Stop(targets []string, b backend.Backend) error {
 
 	// if target is platform, stop all services
 	if len(targets) == 1 {
-		if targets[0] == PlatformCommand {
-			return StopPlatform(b)
-		}
-		if targets[0] == swarm {
-			return StopSwarm(b)
+		switch targets[0] {
+		case PlatformCommand:
+			return StopPlatform(b, false)
+		case StatelessPlatformCommand:
+			return StopPlatform(b, true)
 		}
 	}
 
-	outchan := make(chan string)
-	errchan := make(chan error)
 	var wg sync.WaitGroup
 
-	go printState(outchan, errchan, 500*time.Millisecond)
-
-	b.Stop(targets, &wg, outchan, errchan)
+	b.Stop(targets, &wg, Stdout, Stderr)
 	wg.Wait()
-	close(outchan)
 
 	return nil
 }
 
-func stopDefaultServices(b backend.Backend, wg *sync.WaitGroup, outchan chan string, errchan chan error) {
+func stopDefaultServices(b backend.Backend, stateless bool, wg *sync.WaitGroup, out, err io.Writer) {
 
-	outchan <- fmt.Sprintf("Routing mesh...")
-	b.Stop([]string{"router@*"}, wg, outchan, errchan)
-	wg.Wait()
-
-	outchan <- fmt.Sprintf("Data plane...")
-	b.Stop([]string{"publisher"}, wg, outchan, errchan)
+	fmt.Fprintln(out, "Router mesh...")
+	b.Stop([]string{"router@*"}, wg, out, err)
 	wg.Wait()
 
-	outchan <- fmt.Sprintf("Control plane...")
-	b.Stop([]string{"controller", "builder", "database", "registry@*"}, wg, outchan, errchan)
+	fmt.Fprintln(out, "Data plane...")
+	b.Stop([]string{"publisher"}, wg, out, err)
 	wg.Wait()
 
-	outchan <- fmt.Sprintf("Logging subsystem...")
-	b.Stop([]string{"logger", "logspout"}, wg, outchan, errchan)
+	fmt.Fprintln(out, "Control plane...")
+	if stateless {
+		b.Stop([]string{"controller", "builder", "registry@*"}, wg, out, err)
+	} else {
+		b.Stop([]string{"controller", "builder", "database", "registry@*"}, wg, out, err)
+	}
 	wg.Wait()
 
-	outchan <- fmt.Sprintf("Storage subsystem...")
-	b.Stop([]string{"store-volume", "store-gateway@*"}, wg, outchan, errchan)
+	fmt.Fprintln(out, "Logging subsystem...")
+	if stateless {
+		b.Stop([]string{"logspout"}, wg, out, err)
+	} else {
+		b.Stop([]string{"logger", "logspout"}, wg, out, err)
+	}
 	wg.Wait()
-	b.Stop([]string{"store-metadata"}, wg, outchan, errchan)
-	wg.Wait()
-	b.Stop([]string{"store-daemon"}, wg, outchan, errchan)
-	wg.Wait()
-	b.Stop([]string{"store-monitor"}, wg, outchan, errchan)
-	wg.Wait()
+
+	if !stateless {
+		fmt.Fprintln(out, "Storage subsystem...")
+		b.Stop([]string{"store-volume", "store-gateway@*"}, wg, out, err)
+		wg.Wait()
+		b.Stop([]string{"store-metadata"}, wg, out, err)
+		wg.Wait()
+		b.Stop([]string{"store-daemon"}, wg, out, err)
+		wg.Wait()
+		b.Stop([]string{"store-monitor"}, wg, out, err)
+		wg.Wait()
+	}
+
 }
 
 // Restart stops and then starts the specified components.
-func Restart(argv []string, b backend.Backend) error {
-	usage := `Stops and then starts the specified components.
-
-Usage:
-  deisctl restart [<target>...] [options]
-`
-	// parse command-line arguments
-	if _, err := docopt.Parse(usage, argv, true, "", false); err != nil {
-		return err
-	}
+func Restart(targets []string, b backend.Backend) error {
 
 	// act as if the user called "stop" and then "start"
-	argv[0] = "stop"
-	if err := Stop(argv, b); err != nil {
+	if err := Stop(targets, b); err != nil {
 		return err
 	}
-	argv[0] = "start"
-	return Start(argv, b)
+
+	return Start(targets, b)
 }
 
 // Status prints the current status of components.
-func Status(argv []string, b backend.Backend) error {
-	usage := `Prints the current status of components.
+func Status(targets []string, b backend.Backend) error {
 
-Usage:
-  deisctl status [<target>...] [options]
-`
-	// parse command-line arguments
-	args, err := docopt.Parse(usage, argv, true, "", false)
-	if err != nil {
-		return err
-	}
-
-	targets := args["<target>"].([]string)
 	for _, target := range targets {
 		if err := b.Status(target); err != nil {
 			return err
@@ -296,19 +260,8 @@ Usage:
 }
 
 // Journal prints log output for the specified components.
-func Journal(argv []string, b backend.Backend) error {
-	usage := `Prints log output for the specified components.
+func Journal(targets []string, b backend.Backend) error {
 
-Usage:
-  deisctl journal [<target>...] [options]
-`
-	// parse command-line arguments
-	args, err := docopt.Parse(usage, argv, true, "", false)
-	if err != nil {
-		return err
-	}
-
-	targets := args["<target>"].([]string)
 	for _, target := range targets {
 		if err := b.Journal(target); err != nil {
 			return err
@@ -319,161 +272,124 @@ Usage:
 
 // Install loads the definitions of components from local unit files.
 // After Install, the components will be available to Start.
-func Install(argv []string, b backend.Backend) error {
-	usage := `Loads the definitions of components from local unit files.
+func Install(targets []string, b backend.Backend, cb config.Backend, checkKeys func(config.Backend) error) error {
 
-After install, the components will be available to start.
-
-"deisctl install" looks for unit files in these directories, in this order:
-- the $DEISCTL_UNITS environment variable, if set
-- $HOME/.deis/units
-- /var/lib/deis/units
-
-Usage:
-  deisctl install [<target>...] [options]
-`
-	// parse command-line arguments
-	args, err := docopt.Parse(usage, argv, true, "", false)
-	if err != nil {
-		return err
-	}
-
-	targets := args["<target>"].([]string)
 	// if target is platform, install all services
 	if len(targets) == 1 {
-		if targets[0] == PlatformCommand {
-			return InstallPlatform(b)
-		}
-		if targets[0] == swarm {
-			return InstallSwarm(b)
+		switch targets[0] {
+		case PlatformCommand:
+			return InstallPlatform(b, cb, checkKeys, false)
+		case StatelessPlatformCommand:
+			return InstallPlatform(b, cb, checkKeys, true)
 		}
 	}
-	outchan := make(chan string)
-	errchan := make(chan error)
 	var wg sync.WaitGroup
 
-	go printState(outchan, errchan, 500*time.Millisecond)
-
 	// otherwise create the specific targets
-	b.Create(targets, &wg, outchan, errchan)
+	b.Create(targets, &wg, Stdout, Stderr)
 	wg.Wait()
 
-	close(outchan)
 	return nil
 }
 
-func installDefaultServices(b backend.Backend, wg *sync.WaitGroup, outchan chan string, errchan chan error) {
+func installDefaultServices(b backend.Backend, stateless bool, wg *sync.WaitGroup, out, err io.Writer) {
 
-	outchan <- fmt.Sprintf("Storage subsystem...")
-	b.Create([]string{"store-daemon", "store-monitor", "store-metadata", "store-volume", "store-gateway@1"}, wg, outchan, errchan)
+	if !stateless {
+		fmt.Fprintln(out, "Storage subsystem...")
+		b.Create([]string{"store-daemon", "store-monitor", "store-metadata", "store-volume", "store-gateway@1"}, wg, out, err)
+		wg.Wait()
+	}
+
+	fmt.Fprintln(out, "Logging subsystem...")
+	b.Create([]string{"logger", "logspout"}, wg, out, err)
 	wg.Wait()
 
-	outchan <- fmt.Sprintf("Logging subsystem...")
-	b.Create([]string{"logger", "logspout"}, wg, outchan, errchan)
+	fmt.Fprintln(out, "Control plane...")
+	if stateless {
+		b.Create([]string{"registry@1", "controller", "builder"}, wg, out, err)
+	} else {
+		b.Create([]string{"database", "registry@1", "controller", "builder"}, wg, out, err)
+	}
 	wg.Wait()
 
-	outchan <- fmt.Sprintf("Control plane...")
-	b.Create([]string{"database", "registry@1", "controller", "builder"}, wg, outchan, errchan)
+	fmt.Fprintln(out, "Data plane...")
+	b.Create([]string{"publisher"}, wg, out, err)
 	wg.Wait()
 
-	outchan <- fmt.Sprintf("Data plane...")
-	b.Create([]string{"publisher"}, wg, outchan, errchan)
+	fmt.Fprintln(out, "Router mesh...")
+	b.Create(getRouters(), wg, out, err)
 	wg.Wait()
 
-	outchan <- fmt.Sprintf("Routing mesh...")
-	b.Create([]string{"router@1", "router@2", "router@3"}, wg, outchan, errchan)
-	wg.Wait()
+}
+
+func getRouters() []string {
+	routers := make([]string, RouterMeshSize)
+	for i := uint8(0); i < RouterMeshSize; i++ {
+		routers[i] = fmt.Sprintf("router@%d", i+1)
+	}
+	return routers
 }
 
 // Uninstall unloads the definitions of the specified components.
 // After Uninstall, the components will be unavailable until Install is called.
-func Uninstall(argv []string, b backend.Backend) error {
-	usage := `Unloads the definitions of the specified components.
-
-After uninstall, the components will be unavailable until install is called.
-
-Usage:
-  deisctl uninstall [<target>...] [options]
-`
-	// parse command-line arguments
-	args, err := docopt.Parse(usage, argv, true, "", false)
-	if err != nil {
-		return err
-	}
-
-	// if target is platform, uninstall all services
-	targets := args["<target>"].([]string)
+func Uninstall(targets []string, b backend.Backend) error {
 	if len(targets) == 1 {
-		if targets[0] == PlatformCommand {
-			return UninstallPlatform(b)
-		}
-		if targets[0] == swarm {
-			return UnInstallSwarm(b)
+		switch targets[0] {
+		case PlatformCommand:
+			return UninstallPlatform(b, false)
+		case StatelessPlatformCommand:
+			return UninstallPlatform(b, true)
 		}
 	}
 
-	outchan := make(chan string)
-	errchan := make(chan error)
 	var wg sync.WaitGroup
 
-	go printState(outchan, errchan, 500*time.Millisecond)
-
 	// uninstall the specific target
-	b.Destroy(targets, &wg, outchan, errchan)
-	wg.Wait()
-	close(outchan)
-
-	return nil
-}
-
-func uninstallAllServices(b backend.Backend, wg *sync.WaitGroup, outchan chan string, errchan chan error) error {
-
-	outchan <- fmt.Sprintf("Routing mesh...")
-	b.Destroy([]string{"router@*"}, wg, outchan, errchan)
-	wg.Wait()
-
-	outchan <- fmt.Sprintf("Data plane...")
-	b.Destroy([]string{"publisher"}, wg, outchan, errchan)
-	wg.Wait()
-
-	outchan <- fmt.Sprintf("Control plane...")
-	b.Destroy([]string{"controller", "builder", "database", "registry@*"}, wg, outchan, errchan)
-	wg.Wait()
-
-	outchan <- fmt.Sprintf("Logging subsystem...")
-	b.Destroy([]string{"logger", "logspout"}, wg, outchan, errchan)
-	wg.Wait()
-
-	outchan <- fmt.Sprintf("Storage subsystem...")
-	b.Destroy([]string{"store-volume", "store-gateway@*"}, wg, outchan, errchan)
-	wg.Wait()
-	b.Destroy([]string{"store-metadata"}, wg, outchan, errchan)
-	wg.Wait()
-	b.Destroy([]string{"store-daemon"}, wg, outchan, errchan)
-	wg.Wait()
-	b.Destroy([]string{"store-monitor"}, wg, outchan, errchan)
+	b.Destroy(targets, &wg, Stdout, Stderr)
 	wg.Wait()
 
 	return nil
 }
 
-func printState(outchan chan string, errchan chan error, interval time.Duration) error {
-	for {
-		select {
-		case out := <-outchan:
-			// done on closed channel
-			if out == "" {
-				return nil
-			}
-			fmt.Println(out)
-		case err := <-errchan:
-			if err != nil {
-				fmt.Println(err.Error())
-				return err
-			}
-		}
-		time.Sleep(interval)
+func uninstallAllServices(b backend.Backend, stateless bool, wg *sync.WaitGroup, out, err io.Writer) error {
+
+	fmt.Fprintln(out, "Router mesh...")
+	b.Destroy([]string{"router@*"}, wg, out, err)
+	wg.Wait()
+
+	fmt.Fprintln(out, "Data plane...")
+	b.Destroy([]string{"publisher"}, wg, out, err)
+	wg.Wait()
+
+	fmt.Fprintln(out, "Control plane...")
+	if stateless {
+		b.Destroy([]string{"controller", "builder", "registry@*"}, wg, out, err)
+	} else {
+		b.Destroy([]string{"controller", "builder", "database", "registry@*"}, wg, out, err)
 	}
+	wg.Wait()
+
+	fmt.Fprintln(out, "Logging subsystem...")
+	if stateless {
+		b.Destroy([]string{"logspout"}, wg, out, err)
+	} else {
+		b.Destroy([]string{"logger", "logspout"}, wg, out, err)
+	}
+	wg.Wait()
+
+	if !stateless {
+		fmt.Fprintln(out, "Storage subsystem...")
+		b.Destroy([]string{"store-volume", "store-gateway@*"}, wg, out, err)
+		wg.Wait()
+		b.Destroy([]string{"store-metadata"}, wg, out, err)
+		wg.Wait()
+		b.Destroy([]string{"store-daemon"}, wg, out, err)
+		wg.Wait()
+		b.Destroy([]string{"store-monitor"}, wg, out, err)
+		wg.Wait()
+	}
+
+	return nil
 }
 
 func splitScaleTarget(target string) (c string, num int, err error) {
@@ -493,35 +409,11 @@ func splitScaleTarget(target string) (c string, num int, err error) {
 
 // Config gets or sets a configuration value from the cluster.
 //
-// A configuration value is stored and retrieved from a key/value store (in this case, etcd)
+// A configuration value is stored and retrieved from a key/value store
 // at /deis/<component>/<config>. Configuration values are typically used for component-level
 // configuration, such as enabling TLS for the routers.
-func Config(argv []string) error {
-	usage := `Gets or sets a configuration value from the cluster.
-
-A configuration value is stored and retrieved from a key/value store
-(in this case, etcd) at /deis/<component>/<config>. Configuration
-values are typically used for component-level configuration, such as
-enabling TLS for the routers.
-
-Note: "deisctl config platform set sshPrivateKey=" expects a path
-to a private key.
-
-Usage:
-  deisctl config <target> get [<key>...]
-  deisctl config <target> set <key=val>...
-
-Examples:
-  deisctl config platform set domain=mydomain.com
-  deisctl config platform set sshPrivateKey=$HOME/.ssh/deis
-  deisctl config controller get webEnabled
-`
-	// parse command-line arguments
-	args, err := docopt.Parse(usage, argv, true, "", false)
-	if err != nil {
-		return err
-	}
-	if err := config.Config(args); err != nil {
+func Config(target string, action string, key []string, cb config.Backend) error {
+	if err := config.Config(target, action, key, cb); err != nil {
 		return err
 	}
 	return nil
@@ -530,76 +422,47 @@ Examples:
 // RefreshUnits overwrites local unit files with those requested.
 // Downloading from the Deis project GitHub URL by tag or SHA is the only mechanism
 // currently supported.
-func RefreshUnits(argv []string) error {
-	usage := `Overwrites local unit files with those requested.
-
-Downloading from the Deis project GitHub URL by tag or SHA is the only mechanism
-currently supported.
-
-"deisctl install" looks for unit files in these directories, in this order:
-- the $DEISCTL_UNITS environment variable, if set
-- $HOME/.deis/units
-- /var/lib/deis/units
-
-Usage:
-  deisctl refresh-units [-p <target>] [-t <tag>]
-
-Options:
-  -p --path=<target>   where to save unit files [default: $HOME/.deis/units]
-  -t --tag=<tag>       git tag, branch, or SHA to use when downloading unit files
-                       [default: master]
-`
-	// parse command-line arguments
-	args, err := docopt.Parse(usage, argv, true, "", false)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(2)
-	}
-	dir := args["--path"].(string)
-	dir = utils.ResolvePath(dir)
+func RefreshUnits(unitDir, tag, rootURL string) error {
+	unitDir = utils.ResolvePath(unitDir)
+	decoratorDir := filepath.Join(unitDir, "decorators")
 	// create the target dir if necessary
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(decoratorDir, 0755); err != nil {
 		return err
 	}
 	// download and save the unit files to the specified path
-	rootURL := "https://raw.githubusercontent.com/deis/deis/"
-	tag := args["--tag"].(string)
-	units := []string{
-		"deis-builder.service",
-		"deis-cache.service",
-		"deis-controller.service",
-		"deis-database.service",
-		"deis-logger.service",
-		"deis-logspout.service",
-		"deis-publisher.service",
-		"deis-registry.service",
-		"deis-router.service",
-		"deis-store-admin.service",
-		"deis-store-daemon.service",
-		"deis-store-gateway.service",
-		"deis-store-metadata.service",
-		"deis-store-monitor.service",
-		"deis-store-volume.service",
-	}
-	for _, unit := range units {
-		src := rootURL + tag + "/deisctl/units/" + unit
-		dest := filepath.Join(dir, unit)
-		res, err := http.Get(src)
-		if err != nil {
+	for _, unit := range units.Names {
+		unitSrc := rootURL + tag + "/deisctl/units/" + unit + ".service"
+		unitDest := filepath.Join(unitDir, unit+".service")
+		if err := net.Download(unitSrc, unitDest); err != nil {
 			return err
 		}
-		if res.StatusCode != 200 {
-			return errors.New(res.Status)
+		fmt.Printf("Refreshed %s unit from %s\n", unit, tag)
+		decoratorSrc := rootURL + tag + "/deisctl/units/decorators/" + unit + ".service.decorator"
+		decoratorDest := filepath.Join(decoratorDir, unit+".service.decorator")
+		if err := net.Download(decoratorSrc, decoratorDest); err != nil {
+			if err.Error() == "404 Not Found" {
+				fmt.Printf("Decorator for %s not found in %s\n", unit, tag)
+			} else {
+				return err
+			}
+		} else {
+			fmt.Printf("Refreshed %s decorator from %s\n", unit, tag)
 		}
-		defer res.Body.Close()
-		data, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			return err
-		}
-		if err = ioutil.WriteFile(dest, data, 0644); err != nil {
-			return err
-		}
-		fmt.Printf("Refreshed %s from %s\n", unit, tag)
 	}
 	return nil
+}
+
+// SSH opens an interactive shell on a machine in the cluster
+func SSH(target string, cmd []string, b backend.Backend) error {
+
+	if len(cmd) > 0 {
+		return b.SSHExec(target, strings.Join(cmd, " "))
+	}
+
+	return b.SSH(target)
+}
+
+// Dock connects to the appropriate host and runs 'docker exec -it'.
+func Dock(target string, cmd []string, b backend.Backend) error {
+	return b.Dock(target, cmd)
 }

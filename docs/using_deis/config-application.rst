@@ -20,10 +20,31 @@ Use ``deis config`` to modify environment variables for a deployed application.
     config:set         set environment variables for an app
     config:unset       unset environment variables for an app
     config:pull        extract environment variables to .env
+    config:push        set environment variables from .env
 
-    Use `deis help [command]` to learn more
+    Use `deis help [command]` to learn more.
 
 When config is changed, a new release is created and deployed automatically.
+
+You can set multiple environment variables with one ``deis config:set`` command,
+or with ``deis config:push`` and a local .env file.
+
+.. code-block:: console
+
+    $ deis config:set FOO=1 BAR=baz && deis config:pull
+    $ cat .env
+    FOO=1
+    BAR=baz
+    $ echo "TIDE=high" >> .env
+    $ deis config:push
+    Creating config... done, v4
+
+    === yuppie-earthman
+    DEIS_APP: yuppie-earthman
+    FOO: 1
+    BAR: baz
+    TIDE: high
+
 
 Attach to Backing Services
 --------------------------
@@ -69,6 +90,32 @@ appname to the old one:
     ("start-of-authority") records. It is highly recommended that you bind a subdomain to
     an application, however you can work around this by pointing the @ record to the
     address of the load balancer (if any).
+
+Custom Health Checks
+--------------------
+
+By default, Deis only checks that a container is running. You can add a healthcheck by configuring a
+URL, initial delay, and timeout value:
+
+.. code-block:: console
+
+    $ deis config:set HEALTHCHECK_URL=/200.html
+    === peachy-waxworks
+    HEALTHCHECK_URL: /200.html
+    $ deis config:set HEALTHCHECK_INITIAL_DELAY=5
+    === peachy-waxworks
+    HEALTHCHECK_INITIAL_DELAY: 5
+    HEALTHCHECK_URL: /200.html
+    $ deis config:set HEALTHCHECK_TIMEOUT=5
+    === peachy-waxworks
+    HEALTHCHECK_TIMEOUT: 5
+    HEALTHCHECK_INITIAL_DELAY: 5
+    HEALTHCHECK_URL: /200.html
+
+If a new release does not pass the healthcheck, the application will be rolled back to the previous
+release. Beyond that, if an application container responds to a heartbeat check with a different
+status than a 200 OK, the :ref:`router` will mark that container as down and stop sending
+requests to that container.
 
 Track Changes
 -------------

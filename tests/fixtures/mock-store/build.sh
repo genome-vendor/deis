@@ -11,30 +11,32 @@ if [[ -z $DOCKER_BUILD ]]; then
 fi
 
 # install required packages to build
-apt-get update \
-  && apt-get install -y build-essential git python-dev curl net-tools
+apk add --no-cache \
+  build-base \
+  curl \
+  file \
+  gcc \
+  git \
+  python-dev
 
 # install etcdctl
-curl -sSL -o /usr/local/bin/etcdctl https://s3-us-west-2.amazonaws.com/opdemand/etcdctl-v0.4.6 \
+curl -sSL -o /usr/local/bin/etcdctl https://s3-us-west-2.amazonaws.com/get-deis/etcdctl-v0.4.9 \
   && chmod +x /usr/local/bin/etcdctl
 
-
-git clone https://github.com/jserver/mock-s3 /app/mock-s3 --depth 1
+git clone https://github.com/jserver/mock-s3 /app/mock-s3
 cd /app/mock-s3
-#FIXME: This is a gisted patch to enable pseudo-handling of POST requests, otherwise wal-e crashes attempting to delete old wal segments
-curl https://gist.githubusercontent.com/anonymous/c565f11a8d90d6e2d92b/raw/c5815f6c83aa5c2cfb7b0a34cfab4a075c97be16/mock-s3-post.diff|git apply
+#FIXME: This is a gisted patch to a known "good" version of mock-s3 to enable pseudo-handling of POST requests, otherwise wal-e crashes attempting to delete old wal segments
+git checkout 4c3c3752f990db97e8969c00666251a3b427ef4c
+git apply /tmp/mock-s3-patch.diff
 
 # install pip
-curl -sSL https://raw.githubusercontent.com/pypa/pip/6.1.1/contrib/get-pip.py | python -
+curl -sSL https://bootstrap.pypa.io/get-pip.py | python - pip==8.1.1
 
 python setup.py install
 
-# cleanup. indicate that python, libpq and libyanl are required packages.
-apt-mark unmarkauto python && \
-  apt-get remove -y --purge build-essential python-dev gcc cpp git && \
-  apt-get autoremove -y --purge && \
-  apt-get clean -y && \
-  rm -Rf /usr/share/man /usr/share/doc && \
-  rm -rf /tmp/* /var/tmp/* && \
-  rm -rf /var/lib/apt/lists/*
-
+# cleanup.
+apk del --no-cache \
+  build-base \
+  gcc \
+  git
+rm -rf /tmp/*

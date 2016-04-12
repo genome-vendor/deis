@@ -14,7 +14,7 @@ Each Deis component is deployed as a container or set of containers.
 Controller
 ----------
 The controller component is an HTTP API server. Among other functions, the
-controller contains :ref:`the scheduler <choosing_a_scheduler>`, which decides
+controller contains :ref:`the scheduler <scheduler>`, which decides
 where to run app containers.
 The ``deis`` command-line client interacts with this component.
 
@@ -24,17 +24,6 @@ Database
 --------
 The database component is a `PostgreSQL`_ server used to store durable
 platform state. Backups and WAL logs are pushed to :ref:`Store`.
-
-.. _cache:
-
-Cache
------
-The cache component is an optional instance of `Redis`_. If the cache is running,
-it will be used by the :ref:`registry`.
-
-Caching can cause problems for ``deis pull``, but may speed up access to small
-files when using a remote storage backend such as S3. The ``deisctl`` provisioning
-tool does not install or start the cache by default.
 
 .. _builder:
 
@@ -49,10 +38,17 @@ The builder component uses a `Git`_ server to process
  #. Builds a new `Docker` image from the updated git repository
  #. Adds the latest :ref:`Config` to the resulting Docker image
  #. Pushes the new Docker image to the platform's :ref:`Registry`
- #. Creates a new :ref:`Release` on the :ref:`Controller`
+ #. Triggers a new :ref:`Release` through the :ref:`Controller`
 
-Once a new :ref:`Release` is generated, a new set of containers
-is deployed across the platform automatically.
+.. note::
+
+    The builder component does not incorporate :ref:`Config` directly into the
+    images it produces.   A :ref:`Release` is a pairing of an application image
+    with application configuration maintained separately in the Deis
+    :ref:`Database`.
+
+    Once a new :ref:`Release` is generated, a new set of containers
+    is deployed across the platform automatically.
 
 .. _registry:
 

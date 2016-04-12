@@ -1,4 +1,4 @@
-﻿:title: Contributor Overview
+:title: Contributor Overview
 :description: Interested in contributing to the Deis project? There are lots of ways to help.
 
 .. _contributor:
@@ -23,6 +23,14 @@ Contribute Code
 ---------------
 We are always looking for help improving the core framework, modules, tooling and test coverage.
 Interested in contributing code? Let’s chat in IRC. Make sure to check out issues tagged `easy-fix`_.
+
+When you're ready to begin writing code, review :ref:`design-documents` and :ref:`hacking`.
+
+.. important::
+
+    If you're a new contributor to Deis, your Pull Request could earn you
+    :ref:`credit at DigitalOcean <digitalocean_credit>`!
+
 
 Share your Experience
 ---------------------

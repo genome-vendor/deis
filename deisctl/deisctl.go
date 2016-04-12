@@ -10,7 +10,7 @@ import (
 
 	"github.com/deis/deis/deisctl/backend/fleet"
 	"github.com/deis/deis/deisctl/client"
-	"github.com/deis/deis/deisctl/utils"
+	"github.com/deis/deis/pkg/prettyprint"
 	"github.com/deis/deis/version"
 
 	docopt "github.com/docopt/docopt-go"
@@ -24,22 +24,29 @@ func main() {
 
 // Command executes the given deisctl command line.
 func Command(argv []string) int {
-	deisctlMotd := utils.DeisIfy("Deis Control Utility")
+	deisctlMotd := prettyprint.DeisIfy("Deis Control Utility")
 	usage := deisctlMotd + `
 Usage: deisctl [options] <command> [<args>...]
 
 Commands, use "deisctl help <command>" to learn more:
-  install           install components, or the entire platform
-  uninstall         uninstall components
-  list              list installed components
-  start             start components
-  stop              stop components
-  restart           stop, then start components
-  scale             grow or shrink the number of routers, registries or store gateways
-  journal           print the log output of a component
   config            set platform or component values
-  refresh-units     refresh unit files from GitHub
+  dock              open an interactive shell on a container in the cluster
   help              show the help screen for a command
+  install           install components, or the entire platform
+  journal           print the log output of a component
+  list              list installed components
+  machines          list the current hosts in the cluster
+  refresh-units     refresh unit files from GitHub
+  restart           stop, then start components
+  rolling-restart   perform a rolling restart of a Deis component (currently only router is supported)
+  scale             grow or shrink the number of routers, registries or store gateways
+  ssh               open an interactive shell on a machine in the cluster
+  start             start components
+  status            view status of components
+  stop              stop components
+  uninstall         uninstall components
+  upgrade-prep      prepare a running cluster for upgrade
+  upgrade-takeover  allow an upgrade to gracefully takeover a running cluster
 
 Options:
   -h --help                   show this help screen
@@ -59,14 +66,17 @@ Options:
 	argv, helpFlag := parseArgs(argv)
 	// give docopt an optional final false arg so it doesn't call os.Exit()
 	args, err := docopt.Parse(usage, argv, false, version.Version, true, false)
-	if err != nil || len(args) == 0 {
-		if helpFlag {
-			fmt.Print(usage)
-			return 0
-		}
+
+	if err != nil && err.Error() != "" {
+		fmt.Println(err)
 		return 1
 	}
-	command := args["<command>"]
+
+	if len(args) == 0 {
+		return 0
+	}
+
+	command := args["<command>"].(string)
 	setTunnel := true
 	// "--help" and "refresh-units" doesn't need SSH tunneling
 	if helpFlag || command == "refresh-units" {
@@ -86,6 +96,8 @@ Options:
 	switch command {
 	case "list":
 		err = c.List(argv)
+	case "machines":
+		err = c.Machines(argv)
 	case "scale":
 		err = c.Scale(argv)
 	case "start":
@@ -106,6 +118,16 @@ Options:
 		err = c.Config(argv)
 	case "refresh-units":
 		err = c.RefreshUnits(argv)
+	case "ssh":
+		err = c.SSH(argv)
+	case "dock":
+		err = c.Dock(argv)
+	case "upgrade-prep":
+		err = c.UpgradePrep(argv)
+	case "upgrade-takeover":
+		err = c.UpgradeTakeover(argv)
+	case "rolling-restart":
+		err = c.RollingRestart(argv)
 	case "help":
 		fmt.Print(usage)
 		return 0

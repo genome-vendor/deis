@@ -1,19 +1,29 @@
-FROM golang:1.4
+FROM alpine:3.3
 
-ADD firewall /tmp/firewall
+# install common packages
+RUN apk add --no-cache \
+	bash \
+	curl \
+	geoip \
+	libssl1.0 \
+	openssl \
+	pcre \
+	sudo
 
-ADD build.sh /go/src/github.com/deis/deis/router/build.sh
+# install confd
+RUN curl -sSL -o /usr/local/bin/confd https://s3-us-west-2.amazonaws.com/opdemand/confd-git-73f7489 \
+  && chmod +x /usr/local/bin/confd
 
-WORKDIR /go/src/github.com/deis/deis/router
+# add nginx user
+RUN addgroup -S nginx && \
+  adduser -S -G nginx -H -h /opt/nginx -s /sbin/nologin -D nginx
 
-RUN DOCKER_BUILD=true /go/src/github.com/deis/deis/router/build.sh
+COPY rootfs /
 
-RUN tar -C /opt/nginx -czf /nginx.tgz .
+# compile nginx from source
+RUN build
 
-RUN go get github.com/tools/godep
+CMD ["boot"]
+EXPOSE 80 2222 9090
 
-ADD . /go/src/github.com/deis/deis/router/
-
-RUN CGO_ENABLED=0 godep go build -a -installsuffix cgo -ldflags '-s' boot.go
-
-RUN cp /go/src/github.com/deis/deis/router/boot /go/bin/boot
+ENV DEIS_RELEASE 1.14.0-dev

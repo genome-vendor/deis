@@ -77,8 +77,7 @@
                       </div>
 
                       <div class="byline-menu">
-                          <span class="cloud-logo"></span>
-                          <p>Deis is a project by<br>Engine Yard</p>
+                          <p>Deis is a project by <a href="https://deis.com/community">Engine Yard</a></p>
                       </div>
                     </footer>
                 </div>
@@ -86,6 +85,11 @@
 
             <div class="span6 column_calc contents">
               <div class="doc-content">
+
+                  <div class="version-warning important">
+                      <p class="version-warning-title">Version 1</p>
+                      <p>This documentation is for Deis Workflow (v1). For v2 documentation visit <a href="https://github.com/deis/workflow/">https://github.com/deis/workflow</a>.</p>
+                  </div>
                 {% block body %}
                 {% endblock %}
                 {%- if pagename != 'index' %}

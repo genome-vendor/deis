@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Prepares the process environment to run a test
 
@@ -13,6 +13,10 @@ log_phase "Preparing test environment"
 # use GOPATH to determine project root
 export DEIS_ROOT=${GOPATH?}/src/github.com/deis/deis
 echo "DEIS_ROOT=$DEIS_ROOT"
+
+# the "deis" binary CLI to use in testing
+export DEIS_BINARY=${DEIS_BINARY:-$DEIS_ROOT/client/deis}
+echo "DEIS_BINARY=$DEIS_BINARY"
 
 # prepend GOPATH/bin to PATH
 export PATH=${GOPATH}/bin:$PATH
@@ -59,7 +63,7 @@ export DEIS_PROFILE=test-$DEIS_TEST_ID
 rm -f $HOME/.deis/test-$DEIS_TEST_ID.json
 
 # bail if registry is not accessible
-if ! curl -s $DEV_REGISTRY; then
+if ! curl -s $DEV_REGISTRY && ! curl -s https://$DEV_REGISTRY; then
   echo "DEV_REGISTRY is not accessible, exiting..."
   exit 1
 fi
@@ -85,15 +89,20 @@ ssh-add -D || eval $(ssh-agent) && ssh-add -D
 ssh-add ~/.ssh/$DEIS_TEST_AUTH_KEY
 ssh-add $DEIS_TEST_SSH_KEY
 
+# clear the drink of choice in case the user has set it
+unset DEIS_DRINK_OF_CHOICE
+
 # wipe out all vagrants & deis virtualboxen
 function cleanup {
-    log_phase "Cleaning up"
-    set +e
-    ${GOPATH}/src/github.com/deis/deis/tests/bin/destroy-all-vagrants.sh
-    VBoxManage list vms | grep deis | sed -n -e 's/^.* {\(.*\)}/\1/p' | xargs -L1 -I {} VBoxManage unregistervm {} --delete
-    vagrant global-status --prune
-    docker rm -f -v `docker ps | grep deis- | awk '{print $1}'` 2>/dev/null
-    log_phase "Test run complete"
+    if [ "$SKIP_CLEANUP" != true ]; then
+        log_phase "Cleaning up"
+        set +e
+        ${GOPATH}/src/github.com/deis/deis/tests/bin/destroy-all-vagrants.sh
+        VBoxManage list vms | grep deis | sed -n -e 's/^.* {\(.*\)}/\1/p' | xargs -L1 -I {} VBoxManage unregistervm {} --delete
+        vagrant global-status --prune
+        docker rm -f -v `docker ps | grep deis- | awk '{print $1}'` 2>/dev/null
+        log_phase "Test run complete"
+    fi
 }
 
 function dump_logs {
@@ -110,8 +119,6 @@ function dump_logs {
     #echo "$CURRENT_APP"
     get_journal_logs $CURRENT_APP
   done
-  # etcd keyspace
-  get_logs deis-controller "etcdctl ls / --recursive" etcdctl-dump
   # component logs
   get_logs deis-builder
   get_logs deis-controller
@@ -136,13 +143,25 @@ function dump_logs {
   get_logs deis-router@3 deis-store-volume deis-store-volume-3
   get_logs deis-store-gateway
 
-  # get debug-etcd logs
+  # docker logs
+  fleetctl -strict-host-key-checking=false ssh deis-router@1 journalctl --no-pager -u docker \
+    > $FAILED_LOGS_DIR/docker-1.log
+  fleetctl -strict-host-key-checking=false ssh deis-router@2 journalctl --no-pager -u docker \
+    > $FAILED_LOGS_DIR/docker-2.log
+  fleetctl -strict-host-key-checking=false ssh deis-router@3 journalctl --no-pager -u docker \
+    > $FAILED_LOGS_DIR/docker-3.log
+
+  # etcd logs
   fleetctl -strict-host-key-checking=false ssh deis-router@1 journalctl --no-pager -u etcd \
     > $FAILED_LOGS_DIR/debug-etcd-1.log
   fleetctl -strict-host-key-checking=false ssh deis-router@2 journalctl --no-pager -u etcd \
     > $FAILED_LOGS_DIR/debug-etcd-2.log
   fleetctl -strict-host-key-checking=false ssh deis-router@3 journalctl --no-pager -u etcd \
     > $FAILED_LOGS_DIR/debug-etcd-3.log
+
+  # etcdctl dump
+  fleetctl -strict-host-key-checking=false ssh deis-router@1 etcdctl ls / --recursive \
+    > $FAILED_LOGS_DIR/etcdctl-dump.log
 
   # tarball logs
   BUCKET=jenkins-failure-logs

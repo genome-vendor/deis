@@ -2,7 +2,6 @@ package fleet
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,43 +17,43 @@ const (
 
 var (
 	listUnitFilesFields = map[string]unitToField{
-		"unit": func(u schema.Unit, full bool) string {
+		"unit": func(c *FleetClient, u schema.Unit, full bool) string {
 			return u.Name
 		},
-		"global": func(u schema.Unit, full bool) string {
+		"global": func(c *FleetClient, u schema.Unit, full bool) string {
 			return strconv.FormatBool(suToGlobal(u))
 		},
-		"dstate": func(u schema.Unit, full bool) string {
+		"dstate": func(c *FleetClient, u schema.Unit, full bool) string {
 			if u.DesiredState == "" {
 				return "-"
 			}
 			return u.DesiredState
 		},
-		"tmachine": func(u schema.Unit, full bool) string {
+		"tmachine": func(c *FleetClient, u schema.Unit, full bool) string {
 			if suToGlobal(u) || u.MachineID == "" {
 				return "-"
 			}
-			ms := cachedMachineState(u.MachineID)
+			ms := c.cachedMachineState(u.MachineID)
 			if ms == nil {
 				ms = &machine.MachineState{ID: u.MachineID}
 			}
 
 			return machineFullLegend(*ms, full)
 		},
-		"state": func(u schema.Unit, full bool) string {
+		"state": func(c *FleetClient, u schema.Unit, full bool) string {
 			if suToGlobal(u) || u.CurrentState == "" {
 				return "-"
 			}
 			return u.CurrentState
 		},
-		"hash": func(u schema.Unit, full bool) string {
+		"hash": func(c *FleetClient, u schema.Unit, full bool) string {
 			uf := schema.MapSchemaUnitOptionsToUnitFile(u.Options)
 			if !full {
 				return uf.Hash().Short()
 			}
 			return uf.Hash().String()
 		},
-		"desc": func(u schema.Unit, full bool) string {
+		"desc": func(c *FleetClient, u schema.Unit, full bool) string {
 			uf := schema.MapSchemaUnitOptionsToUnitFile(u.Options)
 			d := uf.Description()
 			if d == "" {
@@ -65,14 +64,14 @@ var (
 	}
 )
 
-type unitToField func(u schema.Unit, full bool) string
+type unitToField func(c *FleetClient, u schema.Unit, full bool) string
 
 // ListUnitFiles prints all Deis-related unit files to Stdout
 func (c *FleetClient) ListUnitFiles() (err error) {
 	var sortable sort.StringSlice
 	units := make(map[string]*schema.Unit, 0)
 
-	us, err := cAPI.Units()
+	us, err := c.Fleet.Units()
 	if err != nil {
 		return err
 	}
@@ -84,28 +83,23 @@ func (c *FleetClient) ListUnitFiles() (err error) {
 		}
 	}
 	sortable.Sort()
-	printUnitFiles(units, sortable)
+	c.printUnitFiles(units, sortable)
 	return
 }
 
 // printUnitFiles writes unit files to stdout using a tabwriter
-func printUnitFiles(units map[string]*schema.Unit, sortable sort.StringSlice) {
+func (c *FleetClient) printUnitFiles(units map[string]*schema.Unit, sortable sort.StringSlice) {
 	cols := strings.Split(defaultListUnitFilesFields, ",")
-	for _, s := range cols {
-		if _, ok := listUnitsFields[s]; !ok {
-			fmt.Fprintf(os.Stderr, "Invalid key in output format: %q\n", s)
-		}
-	}
-	fmt.Fprintln(out, strings.ToUpper(strings.Join(cols, "\t")))
+	fmt.Fprintln(c.out, strings.ToUpper(strings.Join(cols, "\t")))
 	for _, name := range sortable {
 		var f []string
 		u := units[name]
-		for _, c := range cols {
-			f = append(f, listUnitFilesFields[c](*u, false))
+		for _, col := range cols {
+			f = append(f, listUnitFilesFields[col](c, *u, false))
 		}
-		fmt.Fprintln(out, strings.Join(f, "\t"))
+		fmt.Fprintln(c.out, strings.Join(f, "\t"))
 	}
-	out.Flush()
+	c.out.Flush()
 }
 
 // suToGlobal returns whether or not a schema.Unit refers to a global unit

@@ -1,119 +1,123 @@
 #cloud-config
----
+
 coreos:
-  etcd:
+  etcd2:
     # generate a new token for each unique cluster from https://discovery.etcd.io/new
-    # uncomment the following line and replace it with your discovery URL
-    # discovery: https://discovery.etcd.io/12345693838asdfasfadf13939923
-    addr: $private_ipv4:4001
-    peer-addr: $private_ipv4:7001
-    # give etcd more time if it's under heavy load - prevent leader election thrashing
-    peer-election-timeout: 2000
-    # heartbeat interval should ideally be 1/4 or 1/5 of peer election timeout
-    peer-heartbeat-interval: 500
+    discovery: #DISCOVERY_URL
+    # multi-region and multi-cloud deployments need to use $public_ipv4
+    advertise-client-urls: http://$private_ipv4:2379
+    initial-advertise-peer-urls: http://$private_ipv4:2380
+    # listen on both the official ports and the legacy ports
+    # legacy ports can be omitted if your application doesn't depend on them
+    listen-client-urls: http://0.0.0.0:2379,http://0.0.0.0:4001
+    listen-peer-urls: http://$private_ipv4:2380,http://$private_ipv4:7001
+    data-dir: /var/lib/etcd2
   fleet:
-    # We have to set the public_ip here so this works on Vagrant -- otherwise, Vagrant VMs
-    # will all publish the same private IP. This is harmless for cloud providers.
     public-ip: $private_ipv4
-    # allow etcd to slow down at times
-    etcd_request_timeout: 3.0
+    metadata: controlPlane=true,dataPlane=true,routerMesh=true
+  update:
+    reboot-strategy: "off"
   units:
-  - name: etcd.service
-    command: start
-  - name: upgrade-fleet-091.service
-    command: start
-    content: |
-      [Unit]
-      Description=Upgrade fleet if system fleet is v0.9.1, which has a known bug
-      Before=fleet.service
-      ConditionPathIsSymbolicLink=!/etc/systemd/system/fleet.service.d/99-upgrade-fleet-091.conf
+    - name: etcd.service
+      mask: true
+    - name: etcd2.service
+      command: start
+    - name: fleet.service
+      command: start
+    - name: docker-tcp.socket
+      command: start
+      enable: true
+      content: |
+        [Unit]
+        Description=Docker Socket for the API
 
-      [Service]
-      ExecStart=/usr/bin/bash -c 'if fleetd --version | grep -q 0.9.1; then curl -sSL --retry 5 --retry-delay 2 -o /opt/bin/fleetd-0.9.2 https://s3-us-west-2.amazonaws.com/opdemand/fleetd-v0.9.2 && chmod +x /opt/bin/fleetd-0.9.2 && mkdir -p /etc/systemd/system/fleet.service.d/ && ln -sf /opt/conf/fleetd-092-custom-binary.conf /etc/systemd/system/fleet.service.d/99-upgrade-fleet-091.conf; else rm -f /etc/systemd/system/fleet.service.d/99-upgrade-fleet-091.conf; fi'
-      RemainAfterExit=yes
-      Type=oneshot
-  - name: docker-tcp.socket
-    command: start
-    enable: true
-    content: |
-      [Unit]
-      Description=Docker Socket for the API
+        [Socket]
+        ListenStream=2375
+        Service=docker.service
+        BindIPv6Only=both
 
-      [Socket]
-      ListenStream=2375
-      BindIPv6Only=both
-      Service=docker.service
-      [Install]
-      WantedBy=sockets.target
-  - name: stop-update-engine.service
-    command: start
-    content: |
-      [Unit]
-      Description=stop update-engine
+        [Install]
+        WantedBy=sockets.target
+    - name: update-engine.service
+      command: stop
+      enable: false
+    - name: docker.service
+      drop-ins:
+      - name: 10-require-flannel.conf
+        content: |
+          [Unit]
+          Requires=flanneld.service
+          After=flanneld.service
+      - name: 50-insecure-registry.conf
+        content: |
+          [Service]
+          Environment="DOCKER_OPTS=--insecure-registry 10.0.0.0/8 --insecure-registry 172.16.0.0/12 --insecure-registry 192.168.0.0/16 --insecure-registry 100.64.0.0/10"
+    - name: flanneld.service
+      command: start
+      drop-ins:
+      - name: 50-network-config.conf
+        content: |
+          [Service]
+          ExecStartPre=-/usr/bin/etcdctl mk /coreos.com/network/config '{"Network": "10.244.0.0/16", "SubnetLen": 24, "SubnetMin": "10.244.0.0", "Backend": {"Type": "vxlan"}}'
+    - name: graceful-ceph-shutdown.service
+      content: |
+        [Unit]
+        Description=Ceph node clean up for Deis
+        DefaultDependencies=no
+        After=fleet.service etcd2.service docker.service docker.socket deis-store-admin.service deis-store-daemon.service deis-store-volume.service deis-store-monitor.service graceful-etcd-shutdown.service
+        Requires=fleet.service etcd2.service docker.service docker.socket deis-store-admin.service deis-store-daemon.service deis-store-volume.service deis-store-monitor.service graceful-etcd-shutdown.service
+        RefuseManualStop=true
 
-      [Service]
-      Type=oneshot
-      ExecStart=/usr/bin/systemctl stop update-engine.service
-      ExecStartPost=/usr/bin/systemctl mask update-engine.service
-  - name: install-deisctl.service
-    command: start
-    content: |
-      [Unit]
-      Description=Install deisctl utility
-      ConditionPathExists=!/opt/bin/deisctl
+        [Install]
+        WantedBy=shutdown.target halt.target reboot.target
 
-      [Service]
-      Type=oneshot
-      ExecStart=/usr/bin/sh -c 'curl -sSL --retry 5 --retry-delay 2 http://deis.io/deisctl/install.sh | sh -s 1.6.0'
-  - name: ntpdate.service
-    command: start
-  - name: timedate-ntp-synchronization.service
-    command: start
-    content: |
-      [Unit]
-      Description=Synchronize system clock
-      After=ntpdate.service
+        [Service]
+        ExecStart=/usr/bin/docker exec deis-store-admin ceph -s
+        ExecStop=/opt/bin/graceful-shutdown.sh --ceph
+        Type=oneshot
+        TimeoutSec=1200
+        RemainAfterExit=yes
+    - name: graceful-etcd-shutdown.service
+      content: |
+        [Unit]
+        Description=etcd clean up for Deis
+        DefaultDependencies=no
+        After=fleet.service etcd2.service docker.service docker.socket
+        Requires=fleet.service etcd2.service docker.service docker.socket
+        RefuseManualStop=true
 
-      [Service]
-      ExecStart=/usr/bin/timedatectl set-timezone UTC
-      ExecStart=/usr/bin/timedatectl set-ntp true
-      ExecStart=/sbin/hwclock --systohc --utc
-      RemainAfterExit=yes
-      Type=oneshot
-  - name: debug-etcd.service
-    content: |
-      [Unit]
-      Description=etcd debugging service
+        [Install]
+        WantedBy=shutdown.target halt.target reboot.target
 
-      [Service]
-      ExecStartPre=/usr/bin/curl -sSL -o /opt/bin/jq http://stedolan.github.io/jq/download/linux64/jq
-      ExecStartPre=/usr/bin/chmod +x /opt/bin/jq
-      ExecStart=/usr/bin/bash -c "while true; do curl -sL http://127.0.0.1:4001/v2/stats/leader | /opt/bin/jq . ; sleep 1 ; done"
-  - name: increase-nf_conntrack-connections.service
-    command: start
-    content: |
-      [Unit]
-      Description=Increase the number of connections in nf_conntrack. default is 65536
+        [Service]
+        ExecStop=/opt/bin/graceful-shutdown.sh --etcd
+        Type=oneshot
+        TimeoutSec=120
+        RemainAfterExit=yes
+    - name: install-deisctl.service
+      command: start
+      content: |
+        [Unit]
+        Description=Install deisctl utility
+        ConditionPathExists=!/opt/bin/deisctl
 
-      [Service]
-      Type=oneshot
-      ExecStartPre=/usr/sbin/modprobe nf_conntrack
-      ExecStart=/bin/sh -c "sysctl -w net.netfilter.nf_conntrack_max=262144"
-  - name: load-overlay-module.service
-    command: start
-    content: |
-      [Unit]
-      Description=Load overlay module before docker start
-      Before=docker.service
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/bin/sh -c 'curl -sSL --retry 5 --retry-delay 2 http://deis.io/deisctl/install.sh | sh -s 1.13.0'
+    - name: increase-nf_conntrack-connections.service
+      command: start
+      content: |
+        [Unit]
+        Description=Increase the number of connections in nf_conntrack. default is 65536
 
-      [Service]
-      ExecStart=/bin/bash -c "lsmod | grep overlay || modprobe overlay"
-  - name: fleet.service
-    command: start
+        [Service]
+        Type=oneshot
+        ExecStartPre=/usr/sbin/modprobe nf_conntrack
+        ExecStart=/bin/sh -c "sysctl -w net.netfilter.nf_conntrack_max=262144"
 write_files:
   - path: /etc/deis-release
     content: |
-      DEIS_RELEASE=v1.6.0
+      DEIS_RELEASE=v1.13.0
   - path: /etc/motd
     content: " \e[31m* *    \e[34m*   \e[32m*****    \e[39mddddd   eeeeeee iiiiiii   ssss\n\e[31m*   *  \e[34m* *  \e[32m*   *     \e[39md   d   e    e    i     s    s\n \e[31m* *  \e[34m***** \e[32m*****     \e[39md    d  e         i    s\n\e[32m*****  \e[31m* *    \e[34m*       \e[39md     d e         i     s\n\e[32m*   * \e[31m*   *  \e[34m* *      \e[39md     d eee       i      sss\n\e[32m*****  \e[31m* *  \e[34m*****     \e[39md     d e         i         s\n  \e[34m*   \e[32m*****  \e[31m* *      \e[39md    d  e         i          s\n \e[34m* *  \e[32m*   * \e[31m*   *     \e[39md   d   e    e    i    s    s\n\e[34m***** \e[32m*****  \e[31m* *     \e[39mddddd   eeeeeee iiiiiii  ssss\n\n\e[39mWelcome to Deis\t\t\tPowered by Core\e[38;5;45mO\e[38;5;206mS\e[39m\n"
   - path: /etc/profile.d/nse-function.sh
@@ -122,15 +126,10 @@ write_files:
       function nse() {
         docker exec -it $1 bash
       }
-  - path: /etc/systemd/system/docker.service.d/50-insecure-registry.conf
-    content: |
-        [Service]
-        EnvironmentFile=/etc/environment_proxy
-        Environment="DOCKER_OPTS=--insecure-registry 10.0.0.0/8 --insecure-registry 172.16.0.0/12 --insecure-registry 192.168.0.0/16 --insecure-registry 100.64.0.0/10"
   - path: /run/deis/bin/get_image
     permissions: '0755'
     content: |
-      #!/bin/bash
+      #!/usr/bin/env bash
       # usage: get_image <component_path>
       IMAGE=`etcdctl get $1/image 2>/dev/null`
 
@@ -152,9 +151,9 @@ write_files:
   - path: /run/deis/bin/preseed
     permissions: '0755'
     content: |
-      #!/bin/bash
+      #!/usr/bin/env bash
 
-      COMPONENTS=(builder cache controller database logger logspout publisher registry router store-daemon store-gateway store-metadata store-monitor)
+      COMPONENTS=(builder controller database logger logspout publisher registry router store-daemon store-gateway store-metadata store-monitor)
       for c in "${COMPONENTS[@]}"; do
         image=`/run/deis/bin/get_image /deis/$c`
         docker history $image >/dev/null 2>&1 || docker pull $image
@@ -162,14 +161,14 @@ write_files:
   - path: /opt/bin/deis-debug-logs
     permissions: '0755'
     content: |
-      #!/bin/bash
+      #!/usr/bin/env bash
 
       echo '--- VERSIONS ---'
       source /etc/os-release
       echo $PRETTY_NAME
       source /etc/deis-release
       echo "Deis $DEIS_RELEASE"
-      etcd -version
+      etcd2 -version | head -n1
       fleet -version
       printf "\n"
 
@@ -185,8 +184,8 @@ write_files:
   - path: /home/core/.toolboxrc
     owner: core
     content: |
-      TOOLBOX_DOCKER_IMAGE=ubuntu-debootstrap
-      TOOLBOX_DOCKER_TAG=14.04
+      TOOLBOX_DOCKER_IMAGE=alpine
+      TOOLBOX_DOCKER_TAG=3.1
       TOOLBOX_USER=root
   - path: /etc/environment_proxy
     owner: core
@@ -203,13 +202,78 @@ write_files:
     content: |
       [Coredump]
       Storage=none
-  - path: /etc/systemd/system/ntpd.service.d/debug.conf
+  - path: /opt/bin/graceful-shutdown.sh
+    permissions: '0755'
     content: |
-      [Service]
-      ExecStart=
-      ExecStart=/usr/sbin/ntpd -g -n -f /var/lib/ntp/ntp.drift
-  - path: /opt/conf/fleetd-092-custom-binary.conf
+      #!/usr/bin/bash
+      ceph_shutdown () {
+        # determine osd id
+        OSD_HOSTS=($(etcdctl ls /deis/store/hosts/| awk -F'/' '{print $5}'))
+        for HOST in "${OSD_HOSTS[@]}"
+        do
+          PUBLIC_IP=$(etcdctl member list|grep `cat /etc/machine-id`| awk '{print $3}'| grep -Eo '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
+          if [ "$HOST" = "$PUBLIC_IP" ] ; then
+            OSD_ID=$(etcdctl get /deis/store/osds/$PUBLIC_IP)
+            break
+          fi
+        done
+        # if we own an osd and its healthy, try to gracefully remove it
+        if [ ! -z "$OSD_ID" ] && [ ${#OSD_HOSTS[@]} -gt "3" ]; then
+          ADMIN_RUNNING=$(docker inspect --format="{{ .State.Running }}" deis-store-admin)
+          if [ $? -eq 1 ] || [ "$ADMIN_RUNNING" == "false" ]; then
+            echo "deis-store-admin container is required for graceful shutdown"
+            exit 2
+          fi
+          set -e -x -o pipefail
+          CURRENT_STATUS=$(docker exec deis-store-admin ceph health | awk '{print $1}')
+          if [[ "$CURRENT_STATUS" != *"HEALTH_OK"* ]]; then
+            echo "Ceph cluster must be healthy to perform graceful removal"
+            exit 3
+          fi
+
+          docker exec deis-store-admin ceph osd out $OSD_ID
+          sleep 30
+          TIMEWAITED=0
+          until [[ $(docker exec deis-store-admin ceph health) == *"HEALTH_OK"* ]]
+          do
+            if [ $TIMEWAITED -gt "1200" ]
+            then
+              echo "ceph graceful removal timeout exceeded"
+              break
+            fi
+            echo "waiting" && sleep 5
+            TIMEWAITED=$((TIMEWAITED+5))
+          done
+          docker stop deis-store-daemon
+          docker exec deis-store-admin ceph osd crush remove osd.$OSD_ID
+          docker exec deis-store-admin ceph auth del osd.$OSD_ID
+          docker exec deis-store-admin ceph osd rm $OSD_ID
+          etcdctl rm /deis/store/osds/$PUBLIC_IP
+          etcdctl rm /deis/store/hosts/$PUBLIC_IP && sleep 10
+          # remove ceph mon
+          docker stop deis-store-monitor || true
+          docker exec deis-store-admin ceph mon remove `hostname -f` # fixme
+          docker stop deis-store-metadata || true
+        fi
+      }
+      etcd_shutdown () {
+        set -e -x -o pipefail
+        # removing the node from etcd
+        NODE=$(etcdctl member list | grep `cat /etc/machine-id` | cut -d ':' -f 1)
+        etcdctl member remove $NODE
+      }
+      if [ "$1" == "--ceph" ]; then
+        ceph_shutdown
+      elif [ "$1" == "--etcd" ]; then
+        etcd_shutdown
+      fi
+  - path: /opt/bin/wupiao
+    permissions: '0755'
     content: |
-      [Service]
-      ExecStart=
-      ExecStart=/opt/bin/fleetd-0.9.2
+      #!/usr/bin/env bash
+      # [w]ait [u]ntil [p]ort [i]s [a]ctually [o]pen
+      [ -n "$1" ] && \
+        until curl -o /dev/null -sIf http://${1}; do \
+          sleep 1 && echo .;
+        done;
+      exit $?

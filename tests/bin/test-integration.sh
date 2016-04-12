@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Preps a test environment and runs `make test-integration`
 # against artifacts produced from the current source tree
@@ -81,6 +81,6 @@ deisctl config platform set sshPrivateKey=$DEIS_TEST_SSH_KEY
 time deisctl install platform
 time deisctl start platform
 
-log_phase "Running integration suite"
+log_phase "Running integration test suite"
 
 time make test-integration

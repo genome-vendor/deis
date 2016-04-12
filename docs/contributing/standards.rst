@@ -4,19 +4,26 @@
 
 .. _standards:
 
-PR Checklist
-============
+Submitting a Pull Request
+=========================
 
 Proposed changes to Deis are made as GitHub `pull requests`_.
 
 Please make sure your PR follows this checklist:
 
-1. `Single Issue`_
-2. `Include Tests`_
-3. `Include Docs`_
-4. `Code Standards`_
-5. `Commit Style`_
+1. `Design Document`_
+2. `Single Issue`_
+3. `Include Tests`_
+4. `Include Docs`_
+5. `Code Standards`_
+6. `Commit Style`_
 
+Design Document
+---------------
+
+Before opening a pull request, ensure your change also references a design
+document if the contribution is substantial. For more information, see
+:ref:`design-documents`.
 
 Single Issue
 ------------
@@ -82,18 +89,6 @@ the exception that lines of code may be up to 99 characters long. Docstrings and
 tests are required for all public methods, although the flake8_ tool used by
 Deis does not enforce this.
 
-
-Design Proposals
-----------------
-
-When considering a design proposal, we are looking for:
-
-- A description of the problem this design proposal solves
-- A pull request that modifies the documentation, describing the feature you are proposing
-- Prefix your pull request with ``Proposal:`` in the title
-- Please review the existing Proposals before reporting a new one.
-
-
 .. _commit_style_guide:
 
 Commit Style
@@ -122,6 +117,9 @@ Example
         umVEX-8 series artifacts will need to be updated to umVX format
         with the consortium or vendor toolset.
 
+.. note::
+
+  You can install a git hook that checks your commit message format with ``make commit-hook``
 
 Subject Line
 """"""""""""
@@ -171,6 +169,10 @@ to indicate that a PR is acceptable. Any code change--other than
 a simple typo fix or one-line documentation change--requires at least two
 maintainers to accept it.
 
+No pull requests can be merged until at least one core maintainer_ signs off
+with an LGTM. The other LGTM can come from either a core maintainer or
+contributing maintainer.
+
 If the PR is from a Deis maintainer, then he or she should be the one to close
 it. This keeps the commit stream clean and gives the maintainer the benefit of
 revisiting the PR before deciding whether or not to merge the changes.
@@ -185,3 +187,4 @@ revisiting the PR before deciding whether or not to merge the changes.
 .. _`pull request`: https://github.com/deis/deis/pulls
 .. _`pull requests`: https://github.com/deis/deis/pulls
 .. _`GitHub issue`: https://github.com/deis/deis/issues
+.. _maintainer: https://github.com/deis/deis/blob/master/MAINTAINERS.md

@@ -9,15 +9,17 @@ Server Reference
 
 .. toctree::
 
-
     api.admin
-    api.exceptions
+    api.authentication
     api.fields
+    api.middleware
     api.models
+    api.permissions
     api.routers
     api.serializers
     api.utils
     api.views
+    api.viewsets
     registry
     scheduler
     web

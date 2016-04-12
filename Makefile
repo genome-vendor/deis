@@ -7,11 +7,11 @@ include includes.mk
 # the filepath to this repository, relative to $GOPATH/src
 repo_path = github.com/deis/deis
 
-GO_PACKAGES = pkg/time version
+GO_PACKAGES = version
 GO_PACKAGES_REPO_PATH = $(addprefix $(repo_path)/,$(GO_PACKAGES))
 
-COMPONENTS=builder cache controller database logger logspout publisher registry router store swarm
-START_ORDER=publisher store logger logspout database cache registry controller builder router
+COMPONENTS=builder controller database logger logspout publisher registry router $(STORE_IF_STATEFUL)
+START_ORDER=publisher $(STORE_IF_STATEFUL) logger logspout database registry controller builder router
 CLIENTS=client deisctl
 
 all: build run
@@ -19,18 +19,31 @@ all: build run
 dev-registry: check-docker
 	@docker inspect registry >/dev/null 2>&1 && docker start registry || docker run --restart="always" -d -p 5000:5000 --name registry registry:0.9.1
 	@echo
-	@echo "To use local boot2docker registry for Deis development:"
-	@echo "    export DEV_REGISTRY=`boot2docker ip 2>/dev/null`:5000"
+	@echo "To use a local registry for Deis development:"
+	@echo "    export DEV_REGISTRY=`docker-machine ip $$(docker-machine active 2>/dev/null) 2>/dev/null || echo $(HOST_IPADDR) `:5000"
 
 dev-cluster: discovery-url
 	vagrant up
 	ssh-add ~/.vagrant.d/insecure_private_key
 	deisctl config platform set sshPrivateKey=$(HOME)/.vagrant.d/insecure_private_key
 	deisctl config platform set domain=local3.deisapp.com
+	deisctl config platform set enablePlacementOptions=true
 	deisctl install platform
 
 discovery-url:
-	sed -e "s,# discovery:,discovery:," -e "s,discovery: https://discovery.etcd.io/.*,discovery: $$(curl -s -w '\n' https://discovery.etcd.io/new)," contrib/coreos/user-data.example > contrib/coreos/user-data
+	@for i in 1 2 3 4 5; do \
+		URL=`curl -s -w '\n' https://discovery.etcd.io/new?size=$$DEIS_NUM_INSTANCES`; \
+		if [ ! -z $$URL ]; then \
+			sed -e "s,discovery: #DISCOVERY_URL,discovery: $$URL," contrib/coreos/user-data.example > contrib/coreos/user-data; \
+			echo "Wrote $$URL to contrib/coreos/user-data"; \
+		    break; \
+		fi; \
+		if [ $$i -eq 5 ]; then \
+			echo "Failed to contact https://discovery.etcd.io after $$i tries"; \
+		else \
+			sleep 3; \
+		fi \
+	done
 
 build: check-docker
 	@$(foreach C, $(COMPONENTS), $(MAKE) -C $(C) build &&) echo done
@@ -73,6 +86,18 @@ release: check-registry
 
 deploy: build dev-release restart
 
+setup-gotools:
+	go get -u -v github.com/tools/godep
+	go get -u -v github.com/golang/lint/golint
+	go get -u -v golang.org/x/tools/cmd/cover
+	go get -u -v golang.org/x/tools/cmd/vet
+
+setup-root-gotools:
+# "go vet" and "go cover" must be installed as root on some systems
+	sudo GOPATH=/tmp/tmpGOPATH go get -u -v golang.org/x/tools/cmd/cover
+	sudo GOPATH=/tmp/tmpGOPATH go get -u -v golang.org/x/tools/cmd/vet
+	sudo rm -rf /tmp/tmpGOPATH
+
 test: test-style test-unit test-functional push test-integration
 
 test-functional:
@@ -80,7 +105,7 @@ test-functional:
 
 test-unit:
 	@$(foreach C, $(COMPONENTS), $(MAKE) -C $(C) test-unit &&) echo done
-	@$(foreach C, $(CLIENTS), $(MAKE) -C $(C) test-unit &&) echo done
+	@$(foreach C, pkg $(CLIENTS), $(MAKE) -C $(C) test-unit &&) echo done
 
 test-integration:
 	$(MAKE) -C tests/ test-full
@@ -96,4 +121,7 @@ test-style:
 	@for i in $(addsuffix /...,$(GO_PACKAGES)); do \
 		$(GOLINT) $$i; \
 	done
-	@$(foreach C, tests $(CLIENTS) $(COMPONENTS), $(MAKE) -C $(C) test-style &&) echo done
+	@$(foreach C, tests pkg $(CLIENTS) $(COMPONENTS), $(MAKE) -C $(C) test-style &&) echo done
+
+commit-hook:
+	cp contrib/util/commit-msg .git/hooks/commit-msg

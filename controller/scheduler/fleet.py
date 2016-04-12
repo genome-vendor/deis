@@ -1,15 +1,16 @@
-import cStringIO
 import base64
 import copy
+import cStringIO
 import httplib
 import json
 import paramiko
-import socket
 import re
+import socket
 import time
 
 from django.conf import settings
 
+from . import AbstractSchedulerClient
 from .states import JobState
 
 
@@ -32,13 +33,10 @@ class UHTTPConnection(httplib.HTTPConnection):
         self.sock = sock
 
 
-class FleetHTTPClient(object):
+class FleetHTTPClient(AbstractSchedulerClient):
 
     def __init__(self, target, auth, options, pkey):
-        self.target = target
-        self.auth = auth
-        self.options = options
-        self.pkey = pkey
+        super(FleetHTTPClient, self).__init__(target, auth, options, pkey)
         # single global connection
         self.conn = UHTTPConnection(self.target)
 
@@ -51,7 +49,7 @@ class FleetHTTPClient(object):
         return self.conn.getresponse()
 
     def _get_unit(self, name):
-        for attempt in range(RETRIES):
+        for attempt in xrange(RETRIES):
             try:
                 resp = self._request_unit('GET', name)
                 data = resp.read()
@@ -65,7 +63,7 @@ class FleetHTTPClient(object):
                     raise
 
     def _put_unit(self, name, body):
-        for attempt in range(RETRIES):
+        for attempt in xrange(RETRIES):
             try:
                 resp = self._request_unit('PUT', name, body)
                 data = resp.read()
@@ -119,7 +117,7 @@ class FleetHTTPClient(object):
     # container api
 
     def create(self, name, image, command='', template=None, **kwargs):
-        """Create a container"""
+        """Create a container."""
         self._create_container(name, image, command,
                                template or copy.deepcopy(CONTAINER_TEMPLATE), **kwargs)
 
@@ -129,7 +127,7 @@ class FleetHTTPClient(object):
         # prepare memory limit for the container type
         mem = kwargs.get('memory', {}).get(l['c_type'], None)
         if mem:
-            l.update({'memory': '-m {}'.format(mem.lower())})
+            l.update({'memory': '-m {} {}'.format(mem.lower(), settings.DISABLE_SWAP)})
         else:
             l.update({'memory': ''})
         # prepare memory limit for the container type
@@ -152,8 +150,11 @@ class FleetHTTPClient(object):
             f['value'] = f['value'].format(**l)
         # prepare tags only if one was provided
         tags = kwargs.get('tags', {})
-        if tags:
-            tagset = ' '.join(['"{}={}"'.format(k, v) for k, v in tags.items()])
+        unit_tags = tags.viewitems()
+        if settings.ENABLE_PLACEMENT_OPTIONS in ['true', 'True', 'TRUE', '1']:
+            tags['dataPlane'] = 'true'
+        if unit_tags:
+            tagset = ' '.join(['"{}={}"'.format(k, v) for k, v in unit_tags])
             unit.append({"section": "X-Fleet", "name": "MachineMetadata",
                          "value": tagset})
         # post unit to fleet
@@ -173,13 +174,13 @@ class FleetHTTPClient(object):
             raise RuntimeError('Unsupported hostname: ' + hostname)
 
     def start(self, name):
-        """Start a container"""
+        """Start a container."""
         self._put_unit(name, {'desiredState': 'launched'})
         self._wait_for_container_running(name)
 
     def _wait_for_container_state(self, name):
         # wait for container to get scheduled
-        for _ in range(30):
+        for _ in xrange(30):
             states = self._get_state(name)
             if states and len(states.get('states', [])) == 1:
                 return states.get('states')[0]
@@ -196,7 +197,7 @@ class FleetHTTPClient(object):
 
     def _wait_for_job_state(self, name, state):
         # we bump to 20 minutes here to match the timeout on the router and in the app unit files
-        for _ in range(1200):
+        for _ in xrange(1200):
             if self.state(name) == state:
                 return
             time.sleep(1)
@@ -204,7 +205,7 @@ class FleetHTTPClient(object):
             raise RuntimeError('timeout waiting for job state: {}'.format(state))
 
     def _wait_for_destroy(self, name):
-        for _ in range(30):
+        for _ in xrange(30):
             if not self._get_state(name):
                 break
             time.sleep(1)
@@ -212,12 +213,12 @@ class FleetHTTPClient(object):
             raise RuntimeError('timeout on container destroy')
 
     def stop(self, name):
-        """Stop a container"""
+        """Stop a container."""
         self._put_unit(name, {"desiredState": "loaded"})
         self._wait_for_job_state(name, JobState.created)
 
     def destroy(self, name):
-        """Destroy a container"""
+        """Destroy a container."""
         # call all destroy functions, ignoring any errors
         try:
             self._destroy_container(name)
@@ -226,7 +227,7 @@ class FleetHTTPClient(object):
         self._wait_for_destroy(name)
 
     def _destroy_container(self, name):
-        for attempt in range(RETRIES):
+        for attempt in xrange(RETRIES):
             try:
                 self._delete_unit(name)
                 break
@@ -235,7 +236,7 @@ class FleetHTTPClient(object):
                     raise
 
     def run(self, name, image, entrypoint, command):  # noqa
-        """Run a one-off command"""
+        """Run a one-off command."""
         self._create_container(name, image, command, copy.deepcopy(RUN_TEMPLATE),
                                entrypoint=entrypoint)
         # launch the container
@@ -271,14 +272,14 @@ class FleetHTTPClient(object):
             tran = ssh.get_transport()
 
             def _do_ssh(cmd):
-                chan = tran.open_session()
-                # get a pty so stdout/stderr look right
-                chan.get_pty()
-                out = chan.makefile()
-                chan.exec_command(cmd)
-                output = out.read()
-                rc = chan.recv_exit_status()
-                return rc, output
+                with tran.open_session() as chan:
+                    chan.exec_command(cmd)
+                    while not chan.exit_status_ready():
+                        time.sleep(1)
+                    out = chan.makefile()
+                    output = out.read()
+                    rc = chan.recv_exit_status()
+                    return rc, output
 
             # wait for container to launch
             # we loop indefinitely here, as we have no idea how long the docker pull will take
@@ -291,7 +292,7 @@ class FleetHTTPClient(object):
                 raise RuntimeError('failed to create container')
 
             # wait for container to start
-            for _ in range(2):
+            for _ in xrange(2):
                 _rc, _output = _do_ssh('docker inspect {name}'.format(**locals()))
                 if _rc != 0:
                     raise RuntimeError('failed to inspect container')
@@ -304,7 +305,7 @@ class FleetHTTPClient(object):
                 raise RuntimeError('container failed to start')
 
             # wait for container to complete
-            for _ in range(1200):
+            for _ in xrange(1200):
                 _rc, _output = _do_ssh('docker inspect {name}'.format(**locals()))
                 if _rc != 0:
                     raise RuntimeError('failed to inspect container')
@@ -337,13 +338,14 @@ class FleetHTTPClient(object):
         return rc, output
 
     def state(self, name):
+        """Display the given job's running state."""
         systemdActiveStateMap = {
-            "active": "up",
-            "reloading": "down",
-            "inactive": "created",
-            "failed": "crashed",
-            "activating": "down",
-            "deactivating": "down",
+            'active': 'up',
+            'reloading': 'down',
+            'inactive': 'created',
+            'failed': 'crashed',
+            'activating': 'down',
+            'deactivating': 'down',
         }
         try:
             # NOTE (bacongobbler): this call to ._get_unit() acts as a pre-emptive check to
@@ -354,9 +356,8 @@ class FleetHTTPClient(object):
             # FIXME (bacongobbler): when fleet loads a job, sometimes it'll automatically start and
             # stop the container, which in our case will return as 'failed', even though
             # the container is perfectly fine.
-            if activeState == 'failed':
-                if state['systemdLoadState'] == 'loaded':
-                    return JobState.created
+            if activeState == 'failed' and state['systemdLoadState'] == 'loaded':
+                return JobState.created
             return getattr(JobState, systemdActiveStateMap[activeState])
         except KeyError:
             # failed retrieving a proper response from the fleet API
@@ -366,12 +367,6 @@ class FleetHTTPClient(object):
             # which means it does not exist
             return JobState.destroyed
 
-    def attach(self, name):
-        """
-        Attach to a job's stdin, stdout and stderr
-        """
-        raise NotImplementedError
-
 SchedulerClient = FleetHTTPClient
 
 
@@ -379,9 +374,8 @@ CONTAINER_TEMPLATE = [
     {"section": "Unit", "name": "Description", "value": "{name}"},
     {"section": "Service", "name": "ExecStartPre", "value": '''/bin/sh -c "IMAGE=$(etcdctl get /deis/registry/host 2>&1):$(etcdctl get /deis/registry/port 2>&1)/{image}; docker pull $IMAGE"'''},  # noqa
     {"section": "Service", "name": "ExecStartPre", "value": '''/bin/sh -c "docker inspect {name} >/dev/null 2>&1 && docker rm -f {name} || true"'''},  # noqa
-    {"section": "Service", "name": "ExecStart", "value": '''/bin/sh -c "IMAGE=$(etcdctl get /deis/registry/host 2>&1):$(etcdctl get /deis/registry/port 2>&1)/{image}; docker run --name {name} {memory} {cpu} {hostname} -P $IMAGE {command}"'''},  # noqa
+    {"section": "Service", "name": "ExecStart", "value": '''/bin/sh -c "IMAGE=$(etcdctl get /deis/registry/host 2>&1):$(etcdctl get /deis/registry/port 2>&1)/{image}; docker run --name {name} --rm {memory} {cpu} {hostname} -P $IMAGE {command}"'''},  # noqa
     {"section": "Service", "name": "ExecStop", "value": '''/usr/bin/docker stop {name}'''},
-    {"section": "Service", "name": "ExecStop", "value": '''/usr/bin/docker rm -f {name}'''},
     {"section": "Service", "name": "TimeoutStartSec", "value": "20m"},
     {"section": "Service", "name": "TimeoutStopSec", "value": "10"},
     {"section": "Service", "name": "RestartSec", "value": "5"},

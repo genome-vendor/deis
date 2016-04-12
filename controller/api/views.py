@@ -1,20 +1,39 @@
 """
 RESTful view classes for presenting Deis API objects.
 """
+
+import os.path
+import tempfile
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.contrib.auth.models import User
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from guardian.shortcuts import assign_perm, get_objects_for_user, \
     get_users_with_perms, remove_perm
+from django.views.generic import View
 from rest_framework import mixins, renderers, status
-from rest_framework.decorators import permission_classes
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
+from rest_framework.authtoken.models import Token
+from simpleflock import SimpleFlock
 
 from api import authentication, models, permissions, serializers, viewsets
+
+import requests
+
+
+class HealthCheckView(View):
+    """Simple health check view to determine if the server
+       is responding to HTTP requests.
+    """
+
+    def get(self, request):
+        return HttpResponse("OK")
+    head = get
 
 
 class UserRegistrationViewSet(GenericViewSet,
@@ -25,8 +44,7 @@ class UserRegistrationViewSet(GenericViewSet,
     serializer_class = serializers.UserSerializer
 
 
-class UserManagementViewSet(GenericViewSet,
-                            mixins.DestroyModelMixin):
+class UserManagementViewSet(GenericViewSet):
     serializer_class = serializers.UserSerializer
 
     def get_queryset(self):
@@ -35,14 +53,74 @@ class UserManagementViewSet(GenericViewSet,
     def get_object(self):
         return self.get_queryset()[0]
 
+    def destroy(self, request, **kwargs):
+        calling_obj = self.get_object()
+        target_obj = calling_obj
+
+        if request.data.get('username'):
+            # if you "accidentally" target yourself, that should be fine
+            if calling_obj.username == request.data['username'] or calling_obj.is_superuser:
+                target_obj = get_object_or_404(User, username=request.data['username'])
+            else:
+                raise PermissionDenied()
+
+        # A user can not be removed without apps changing ownership first
+        if len(models.App.objects.filter(owner=target_obj)) > 0:
+            msg = '{} still has applications assigned. Delete or transfer ownership'.format(str(target_obj))  # noqa
+            return Response({'detail': msg}, status=status.HTTP_409_CONFLICT)
+
+        target_obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def passwd(self, request, **kwargs):
-        obj = self.get_object()
-        if not obj.check_password(request.data['password']):
-            return Response({'detail': 'Current password does not match'},
-                            status=status.HTTP_400_BAD_REQUEST)
-        obj.set_password(request.data['new_password'])
-        obj.save()
+        caller_obj = self.get_object()
+        target_obj = self.get_object()
+        if request.data.get('username'):
+            # if you "accidentally" target yourself, that should be fine
+            if caller_obj.username == request.data['username'] or caller_obj.is_superuser:
+                target_obj = get_object_or_404(User, username=request.data['username'])
+            else:
+                raise PermissionDenied()
+        if request.data.get('password') or not caller_obj.is_superuser:
+            if not target_obj.check_password(request.data['password']):
+                return Response({'detail': 'Current password does not match'},
+                                status=status.HTTP_400_BAD_REQUEST)
+        target_obj.set_password(request.data['new_password'])
+        target_obj.save()
         return Response({'status': 'password set'})
+
+
+class TokenManagementViewSet(GenericViewSet,
+                             mixins.DestroyModelMixin):
+    serializer_class = serializers.UserSerializer
+    permission_classes = [permissions.CanRegenerateToken]
+
+    def get_queryset(self):
+        return User.objects.filter(pk=self.request.user.pk)
+
+    def get_object(self):
+        return self.get_queryset()[0]
+
+    def regenerate(self, request, **kwargs):
+        obj = self.get_object()
+
+        if 'all' in request.data:
+            for user in User.objects.all():
+                if not user.is_anonymous():
+                    token = Token.objects.get(user=user)
+                    token.delete()
+                    Token.objects.create(user=user)
+            return Response("")
+
+        if 'username' in request.data:
+            obj = get_object_or_404(User,
+                                    username=request.data['username'])
+            self.check_object_permissions(self.request, obj)
+
+        token = Token.objects.get(user=obj)
+        token.delete()
+        token = Token.objects.create(user=obj)
+        return Response({'token': token.key})
 
 
 class BaseDeisViewSet(viewsets.OwnerViewSet):
@@ -99,7 +177,8 @@ class ReleasableViewSet(AppResourceViewSet):
 
     def get_success_headers(self, data, **kwargs):
         headers = super(ReleasableViewSet, self).get_success_headers(data)
-        headers.update({'X-Deis-Release': self.release.version})
+        headers.update({'Deis-Release': self.release.version})
+        headers.update({'X-Deis-Release': self.release.version})  # DEPRECATED
         return headers
 
 
@@ -134,12 +213,12 @@ class AppViewSet(BaseDeisViewSet):
         new_structure = {}
         app = self.get_object()
         try:
-            for target, count in request.data.items():
+            for target, count in request.data.viewitems():
                 new_structure[target] = int(count)
             models.validate_app_structure(new_structure)
             app.scale(request.user, new_structure)
-        except (TypeError, ValueError):
-            return Response({'detail': 'Invalid scaling format'},
+        except (TypeError, ValueError) as e:
+            return Response({'detail': 'Invalid scaling format: {}'.format(e)},
                             status=status.HTTP_400_BAD_REQUEST)
         except (EnvironmentError, ValidationError) as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -150,13 +229,20 @@ class AppViewSet(BaseDeisViewSet):
     def logs(self, request, **kwargs):
         app = self.get_object()
         try:
-            return Response(app.logs(request.query_params.get('log_lines',
-                                     str(settings.LOG_LINES))),
-                            status=status.HTTP_200_OK, content_type='text/plain')
-        except EnvironmentError:
-            return Response("No logs for {}".format(app.id),
-                            status=status.HTTP_204_NO_CONTENT,
-                            content_type='text/plain')
+            return HttpResponse(app.logs(request.query_params.get('log_lines',
+                                         str(settings.LOG_LINES))),
+                                status=status.HTTP_200_OK, content_type='text/plain')
+        except requests.exceptions.RequestException:
+            return HttpResponse("Error accessing logs for {}".format(app.id),
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                content_type='text/plain')
+        except EnvironmentError as e:
+            if e.message == 'Error accessing deis-logger':
+                return HttpResponse("Error accessing logs for {}".format(app.id),
+                                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                    content_type='text/plain')
+            else:
+                return HttpResponse(status=status.HTTP_204_NO_CONTENT)
 
     def run(self, request, **kwargs):
         app = self.get_object()
@@ -168,6 +254,17 @@ class AppViewSet(BaseDeisViewSet):
             return Response({'detail': str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return Response(output_and_rc, status=status.HTTP_200_OK,
                         content_type='text/plain')
+
+    def update(self, request, **kwargs):
+        app = self.get_object()
+
+        if request.data.get('owner'):
+            if self.request.user != app.owner and not self.request.user.is_superuser:
+                raise PermissionDenied()
+            new_owner = get_object_or_404(User, username=request.data['owner'])
+            app.owner = new_owner
+        app.save()
+        return Response(status=status.HTTP_200_OK)
 
 
 class BuildViewSet(ReleasableViewSet):
@@ -184,6 +281,18 @@ class ConfigViewSet(ReleasableViewSet):
     """A viewset for interacting with Config objects."""
     model = models.Config
     serializer_class = serializers.ConfigSerializer
+
+    def create(self, request, **kwargs):
+        # Guard against overlapping config changes, using a filesystem lock so that
+        # multiple controller processes can be coordinated.
+        # Use a tempfile such as "/tmp/violet-valkyrie-config".
+        lockfile = os.path.join(tempfile.gettempdir(), kwargs['id'] + '-config')
+        try:
+            with SimpleFlock(lockfile, timeout=5):
+                return super(ConfigViewSet, self).create(request, **kwargs)
+        except IOError as err:
+            msg = "Config changes already in progress.\n{}".format(err)
+            return Response(status=status.HTTP_409_CONFLICT, data={'error': msg})
 
     def post_save(self, config):
         release = config.app.release_set.latest()
@@ -246,6 +355,7 @@ class CertificateViewSet(BaseDeisViewSet):
 class KeyViewSet(BaseDeisViewSet):
     """A viewset for interacting with Key objects."""
     model = models.Key
+    permission_classes = [IsAuthenticated, permissions.IsOwner]
     serializer_class = serializers.KeySerializer
 
 
@@ -347,7 +457,6 @@ class AppPermsViewSet(BaseDeisViewSet):
     def get_queryset(self):
         return self.model.objects.all()
 
-    @permission_classes([permissions.IsAppUser])
     def list(self, request, **kwargs):
         app = self.get_object()
         perm_name = "api.{}".format(self.perm)
@@ -355,19 +464,28 @@ class AppPermsViewSet(BaseDeisViewSet):
                      if u.has_perm(perm_name, app)]
         return Response({'users': usernames})
 
-    @permission_classes([permissions.IsOwnerOrAdmin])
     def create(self, request, **kwargs):
         app = self.get_object()
+        if not permissions.IsOwnerOrAdmin.has_object_permission(permissions.IsOwnerOrAdmin(),
+                                                                request, self, app):
+            raise PermissionDenied()
+
         user = get_object_or_404(User, username=request.data['username'])
         assign_perm(self.perm, user, app)
         models.log_event(app, "User {} was granted access to {}".format(user, app))
         return Response(status=status.HTTP_201_CREATED)
 
-    @permission_classes([permissions.IsOwnerOrAdmin])
     def destroy(self, request, **kwargs):
-        app = self.get_object()
+        app = get_object_or_404(models.App, id=self.kwargs['id'])
         user = get_object_or_404(User, username=kwargs['username'])
-        if not user.has_perm(self.perm, app):
+
+        perm_name = "api.{}".format(self.perm)
+        if not user.has_perm(perm_name, app):
+            raise PermissionDenied()
+
+        if (user != request.user and
+            not permissions.IsOwnerOrAdmin.has_object_permission(permissions.IsOwnerOrAdmin(),
+                                                                 request, self, app)):
             raise PermissionDenied()
         remove_perm(self.perm, user, app)
         models.log_event(app, "User {} was revoked access to {}".format(user, app))

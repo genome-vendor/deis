@@ -3,14 +3,8 @@
 registry
 ========
 
-registry.private
-----------------
+registry.dockerclient
+---------------------
 .. contents::
     :local:
-.. automodule:: registry.private
-
-registry.mock
--------------
-.. contents::
-    :local:
-.. automodule:: registry.mock
+.. automodule:: registry.dockerclient

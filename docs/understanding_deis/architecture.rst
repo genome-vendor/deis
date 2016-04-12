@@ -63,6 +63,22 @@ Deis also requires a few lightweight components on these hosts:
  * :ref:`publisher` - publishes end-user containers to the :ref:`router`
  * :ref:`logspout` - feeds log data to the Control Plane :ref:`logger`
 
+ .. _router-mesh:
+
+Router Mesh
+-----------
+
+.. image:: DeisRouterMesh.png
+ :alt: Deis Router Mesh Architecture
+
+The Router Mesh publishes :ref:`Applications <application>` to consumers.
+
+Each :ref:`router` in the mesh is a configurable software load balancer designed to expose
+:ref:`Containers <container>` running in the data plane.
+Routers track healthy containers using a distributed, watchable store like ``etcd``.
+
+Any changes to router configuration or certificates are applied within seconds.
+
 .. _topologies:
 
 Topologies
@@ -70,5 +86,15 @@ Topologies
 
 For small deployments you can run the entire platform
 -- Control Plane, Data Plane and Router Mesh -- on just 3 servers.
-For larger deployments, you'll want to isolate the Control Plane and Router Mesh,
-then scale your data plane out to as many servers as you need.
+
+For larger deployments, you'll want to isolate the Control Plane and Router
+Mesh, then scale your Data Plane out to as many servers as you need.
+
+See :ref:`isolating-planes` for further details.
+
+The Deis Control Plane, Data Plane, and Router Mesh components all depend on an
+etcd cluster for service discovery and configuration. For larger deployments,
+you'll want to isolate this as well.
+
+Those building larger clusters should reference :ref:`isolating-etcd` for
+further details.

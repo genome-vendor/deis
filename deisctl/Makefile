@@ -3,8 +3,8 @@ include ../includes.mk
 # the filepath to this repository, relative to $GOPATH/src
 repo_path = github.com/deis/deis/deisctl
 
-GO_FILES = deisctl.go deisctl_test.go
-GO_PACKAGES = backend client cmd config utils
+GO_FILES = $(wildcard *.go)
+GO_PACKAGES = backend client cmd config units utils
 GO_PACKAGES_REPO_PATH = $(addprefix $(repo_path)/,$(GO_PACKAGES))
 
 COMPONENT = $(notdir $(repo_path))
@@ -21,8 +21,8 @@ installer:
 		dist/deisctl-`cat deis-version`-`go env GOOS`-`go env GOARCH`.run "Deis Control Utility" \
 		"./deisctl refresh-units \
 		&& echo \
-		&& echo '\033[0;36mdeisctl\033[0m is in the current directory and unit files are' \
-		&& echo 'in \$$HOME/.deis/units. Please move \033[0;36mdeisctl\033[0m to a' \
+		&& echo 'deisctl is in the current directory and unit files are' \
+		&& echo 'in \$$HOME/.deis/units. Please move deisctl to a' \
 		&& echo 'directory in your search PATH.' \
 		&& echo \
 		&& echo 'See http://docs.deis.io/ for documentation.' \
@@ -30,16 +30,6 @@ installer:
 
 install:
 	godep go install -v .
-
-setup-root-gotools:
-	sudo GOPATH=/tmp/tmpGOPATH go get -u -v golang.org/x/tools/cmd/cover
-	sudo GOPATH=/tmp/tmpGOPATH go get -u -v golang.org/x/tools/cmd/vet
-	sudo rm -rf /tmp/tmpGOPATH
-
-setup-gotools:
-	go get -u github.com/golang/lint/golint
-	go get -u golang.org/x/tools/cmd/cover
-	go get -u golang.org/x/tools/cmd/vet
 
 test: test-style test-unit
 
@@ -51,4 +41,5 @@ test-style:
 	$(GOLINT) ./...
 
 test-unit:
-	godep go test -v -cover ./...
+# TODO: remove GOMAXPROCS=1 when concurrent stdout issues are fixed
+	GOMAXPROCS=1 $(GOTEST) ./...

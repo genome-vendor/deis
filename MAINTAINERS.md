@@ -47,11 +47,14 @@ The duties of a core maintainer include:
 
 The current core maintainers of Deis:
 * Chris Armstrong - <carmstrong@engineyard.com> ([@carmstrong](https://github.com/carmstrong))
+* Kent Rancourt - <krancourt@engineyard.com> ([@krancour](https://github.com/krancour))
 * Matt Boersma - <mboersma@engineyard.com> ([@mboersma](https://github.com/mboersma))
+* Matt Butcher - <mbutcher@engineyard.com> ([@technosophos](https://github.com/technosophos))
 * Matthew Fisher - <mfisher@engineyard.com> ([@bacongobbler](https://github.com/bacongobbler))
 
-No pull requests can be merged until at least one core maintainer signs off with a [Code LGTM](http://docs.deis.io/en/latest/contributing/standards/#merge-approval). The other LGTM can come from either a core maintainer
-or contributing maintainer.
+No pull requests can be merged until at least one core maintainer signs off with an
+[LGTM](http://docs.deis.io/en/latest/contributing/standards/#merge-approval). The other LGTM can
+come from either a core maintainer or contributing maintainer.
 
 ## Contributing maintainers
 
@@ -63,10 +66,7 @@ conversations where the contributing maintainer is knowledgeable.
 
 The duties of a contributing maintainer are very similar to those of a core maintainer, but they are limited to areas of the Deis project where the contributing maintainer is knowledgeable.
 
-The current contributing maintainers of Deis:
-* Johannes Würbach - <johannes.wuerbach@googlemail.com> ([@johanneswuerbach](https://github.com/johanneswuerbach))
-* Manuel de Brito Fontes - <alejandro.debrito@soficom.cl> ([@aledbf](https://github.com/aledbf))
-* Sivaram Mothiki - <smothiki@engineyard.com> ([@smothiki](https://github.com/smothiki))
+Contributing maintainers are defined in practice as those who have write access to the Deis repository. All maintainers can review pull requests and add LGTM labels as appropriate.
 
 ## Becoming a maintainer
 

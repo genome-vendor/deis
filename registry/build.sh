@@ -10,44 +10,43 @@ if [[ -z $DOCKER_BUILD ]]; then
   exit 1
 fi
 
-DEBIAN_FRONTEND=noninteractive
-
-sed -i 's/main$/main universe/' /etc/apt/sources.list
-
 # install required packages (copied from dotcloud/docker-registry Dockerfile)
-apt-get update && \
-    apt-get install -y git-core build-essential python-dev \
-    libevent-dev libssl-dev libyaml-0-2 libyaml-dev python-openssl liblzma-dev swig
+apk add --no-cache \
+  build-base \
+  git \
+  openssl-dev \
+  python-dev \
+  libffi-dev \
+  swig \
+  libevent-dev \
+  xz-dev
 
 # install pip
-curl -sSL https://raw.githubusercontent.com/pypa/pip/6.1.1/contrib/get-pip.py | python -
+curl -sSL https://bootstrap.pypa.io/get-pip.py | python - pip==8.1.1
 
 # create a registry user
-useradd -s /bin/bash registry
+adduser -D -s /bin/bash registry
 
 # add the docker registry source from github
-git clone -b new-repository-import-v091 --single-branch https://github.com/deis/docker-registry /docker-registry && \
-    chown -R registry:registry /docker-registry
+git clone -b deis-v1-lts --single-branch https://github.com/deis/docker-registry /docker-registry && \
+  chown -R registry:registry /docker-registry
 
 # install boto configuration
 cp /docker-registry/config/boto.cfg /etc/boto.cfg
-cd /docker-registry && pip install -r requirements/main.txt
+cd /docker-registry && pip install --disable-pip-version-check --no-cache-dir -r requirements/main.txt
 
 # Install core
-pip install /docker-registry/depends/docker-registry-core
+pip install --disable-pip-version-check --no-cache-dir /docker-registry/depends/docker-registry-core
 
 # Install registry
-pip install file:///docker-registry#egg=docker-registry[bugsnag,newrelic,cors]
+pip install --disable-pip-version-check --no-cache-dir "file:///docker-registry#egg=docker-registry[bugsnag,newrelic,cors]"
 
-patch \
- $(python -c 'import boto; import os; print os.path.dirname(boto.__file__)')/connection.py \
- < /docker-registry/contrib/boto_header_patch.diff
+# patch boto
+cd "$(python -c 'import boto; import os; print os.path.dirname(boto.__file__)')" \
+  && patch -i /docker-registry/contrib/boto_header_patch.diff connection.py
 
 # cleanup. indicate that python is a required package.
-apt-mark unmarkauto python python-openssl libyaml-0-2 && \
-  apt-get remove -y --purge git-core build-essential libssl-dev libyaml-dev python-dev swig && \
-  apt-get autoremove -y --purge && \
-  apt-get clean -y && \
-  rm -Rf /usr/share/man /usr/share/doc && \
-  rm -rf /tmp/* /var/tmp/* && \
-  rm -rf /var/lib/apt/lists/*
+apk del --no-cache \
+  build-base \
+  linux-headers \
+  python-dev

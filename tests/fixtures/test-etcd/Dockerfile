@@ -1,26 +1,15 @@
-FROM ubuntu-debootstrap:14.04
-
-ENV DEBIAN_FRONTEND noninteractive
+FROM alpine:3.3
 
 # install common packages
-RUN apt-get update && apt-get install -y curl net-tools sudo
+RUN apk add --no-cache curl tar
 
-# install etcdctl
-RUN curl -sSL -o /usr/local/bin/etcdctl https://s3-us-west-2.amazonaws.com/opdemand/etcdctl-v0.4.6 \
-    && chmod +x /usr/local/bin/etcdctl
+# ETCD_VERSION is actually used by the etcd daemon, and causes an issue if we
+# format it for our use here. So, we call this something else.
+ENV INSTALL_ETCD_VERSION v2.1.2
 
-# build etcd and then clean up
-RUN buildDeps='curl git-core'; \
-    set -x; \
-    export DEBIAN_FRONTEND=noninteractive; \
-    apt-get update && apt-get install -y $buildDeps --no-install-recommends \
-    && curl -sSL https://storage.googleapis.com/golang/go1.4.2.linux-amd64.tar.gz | tar -C /usr/local -xz \
-    && git clone -q https://github.com/coreos/etcd.git /opt/etcd \
-    && cd /opt/etcd && git checkout -q v0.4.6 && PATH=/usr/local/go/bin:$PATH ./build \
-    && cp /opt/etcd/bin/etcd /usr/local/bin \
-    && cd && rm -rf /usr/local/go /opt/etcd \
-    && apt-get purge -y $buildDeps \
-    && apt-get autoremove -y && apt-get clean
+# install etcd and etcdctl
+RUN curl -sSL https://github.com/coreos/etcd/releases/download/$INSTALL_ETCD_VERSION/etcd-$INSTALL_ETCD_VERSION-linux-amd64.tar.gz \
+  | tar -vxz -C /usr/local/bin --strip=1
 
-EXPOSE 4001 7001
+EXPOSE 4001 7001 2379 2380
 CMD ["/usr/local/bin/etcd"]

@@ -2,101 +2,94 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"sync"
-	"time"
 
 	"github.com/deis/deis/deisctl/backend"
-	"github.com/deis/deis/deisctl/utils"
+	"github.com/deis/deis/deisctl/config"
+	"github.com/deis/deis/pkg/prettyprint"
 )
 
 // InstallPlatform loads all components' definitions from local unit files.
 // After InstallPlatform, all components will be available for StartPlatform.
-func InstallPlatform(b backend.Backend) error {
+func InstallPlatform(b backend.Backend, cb config.Backend, checkKeys func(config.Backend) error, stateless bool) error {
 
-	if err := checkRequiredKeys(); err != nil {
+	if err := checkKeys(cb); err != nil {
 		return err
 	}
 
-	outchan := make(chan string)
-	errchan := make(chan error)
+	if stateless {
+		fmt.Println("Warning: With a stateless control plane, some components require manual configuration.")
+		fmt.Println("See the official Deis documentation for details on running a stateless control plane.")
+		fmt.Println("http://docs.deis.io/en/latest/managing_deis/running-deis-without-ceph/")
+	}
+
 	var wg sync.WaitGroup
 
-	go printState(outchan, errchan, 500*time.Millisecond)
+	io.WriteString(Stdout, prettyprint.DeisIfy("Installing Deis..."))
 
-	outchan <- utils.DeisIfy("Installing Deis...")
-
-	installDefaultServices(b, &wg, outchan, errchan)
+	installDefaultServices(b, stateless, &wg, Stdout, Stderr)
 
 	wg.Wait()
-	close(outchan)
 
-	fmt.Println("Done.")
-	fmt.Println()
-	fmt.Println("Please run `deisctl start platform` to boot up Deis.")
+	fmt.Fprintln(Stdout, "Done.")
+	fmt.Fprintln(Stdout, "")
+	if stateless {
+		fmt.Fprintln(Stdout, "Please run `deisctl start stateless-platform` to boot up Deis.")
+	} else {
+		fmt.Fprintln(Stdout, "Please run `deisctl start platform` to boot up Deis.")
+	}
 	return nil
 }
 
 // StartPlatform activates all components.
-func StartPlatform(b backend.Backend) error {
+func StartPlatform(b backend.Backend, stateless bool) error {
 
-	outchan := make(chan string)
-	errchan := make(chan error)
 	var wg sync.WaitGroup
 
-	go printState(outchan, errchan, 500*time.Millisecond)
+	io.WriteString(Stdout, prettyprint.DeisIfy("Starting Deis..."))
 
-	outchan <- utils.DeisIfy("Starting Deis...")
-
-	startDefaultServices(b, &wg, outchan, errchan)
+	startDefaultServices(b, stateless, &wg, Stdout, Stderr)
 
 	wg.Wait()
-	close(outchan)
 
-	fmt.Println("Done.")
-	fmt.Println()
-	fmt.Println("Please use `deis register` to setup an administrator account.")
+	fmt.Fprintln(Stdout, "Done.\n ")
+	fmt.Fprintln(Stdout, "Please set up an administrative account. See 'deis help register'")
 	return nil
 }
 
 // StopPlatform deactivates all components.
-func StopPlatform(b backend.Backend) error {
+func StopPlatform(b backend.Backend, stateless bool) error {
 
-	outchan := make(chan string)
-	errchan := make(chan error)
 	var wg sync.WaitGroup
 
-	go printState(outchan, errchan, 500*time.Millisecond)
+	io.WriteString(Stdout, prettyprint.DeisIfy("Stopping Deis..."))
 
-	outchan <- utils.DeisIfy("Stopping Deis...")
-
-	stopDefaultServices(b, &wg, outchan, errchan)
+	stopDefaultServices(b, stateless, &wg, Stdout, Stderr)
 
 	wg.Wait()
-	close(outchan)
 
-	fmt.Println("Done.")
-	fmt.Println()
-	fmt.Println("Please run `deisctl start platform` to restart Deis.")
+	fmt.Fprintln(Stdout, "Done.\n ")
+	if stateless {
+		fmt.Fprintln(Stdout, "Please run `deisctl start stateless-platform` to restart Deis.")
+	} else {
+		fmt.Fprintln(Stdout, "Please run `deisctl start platform` to restart Deis.")
+	}
 	return nil
 }
 
 // UninstallPlatform unloads all components' definitions.
 // After UninstallPlatform, all components will be unavailable.
-func UninstallPlatform(b backend.Backend) error {
+func UninstallPlatform(b backend.Backend, stateless bool) error {
 
-	outchan := make(chan string)
-	errchan := make(chan error)
 	var wg sync.WaitGroup
 
-	go printState(outchan, errchan, 500*time.Millisecond)
+	io.WriteString(Stdout, prettyprint.DeisIfy("Uninstalling Deis..."))
 
-	outchan <- utils.DeisIfy("Uninstalling Deis...")
-
-	uninstallAllServices(b, &wg, outchan, errchan)
+	uninstallAllServices(b, stateless, &wg, Stdout, Stderr)
 
 	wg.Wait()
-	close(outchan)
 
-	fmt.Println("Done.")
+	fmt.Fprintln(Stdout, "Done.")
 	return nil
 }

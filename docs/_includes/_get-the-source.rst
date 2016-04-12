@@ -6,7 +6,7 @@ this documentation. Download an archive file from the `releases page`_, or use
 
     $ git clone https://github.com/deis/deis.git
     $ cd deis
-    $ git checkout v1.6.0
+    $ git checkout v1.13.0
 
 Check out the latest Deis release, rather than using the default (master).
 
@@ -18,6 +18,8 @@ clone the source code into your `$GOPATH`_:
     $ go get -u -v github.com/deis/deis
     $ cd $GOPATH/src/github.com/deis/deis
 
+Additionally, you'll need the ``deisctl`` CLI tool. If you don't already have it,
+install instructions are :ref:`here <install_deisctl>`.
 
 .. _`source code`: https://github.com/deis/deis
 .. _`releases page`: https://github.com/deis/deis/releases

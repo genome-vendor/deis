@@ -3,19 +3,19 @@ include ../includes.mk
 # the filepath to this repository, relative to $GOPATH/src
 repo_path = github.com/deis/deis/publisher
 
-GO_FILES = main.go
+GO_FILES = $(wildcard *.go)
 GO_PACKAGES = server
 GO_PACKAGES_REPO_PATH = $(addprefix $(repo_path)/,$(GO_PACKAGES))
 
 COMPONENT = $(notdir $(repo_path))
 DOCKER_IMAGE := $(IMAGE_PREFIX)$(COMPONENT)
 RELEASE_IMAGE := $(DOCKER_IMAGE):$(BUILD_TAG)
-REMOTE_IMAGE := $(REGISTRY)/$(RELEASE_IMAGE)
+REMOTE_IMAGE := $(REGISTRY)$(RELEASE_IMAGE)
 BINARY_DEST_DIR = image/bin
 
 build: check-docker
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 godep go build -a -installsuffix cgo -ldflags '-s' -o $(BINARY_DEST_DIR)/publisher github.com/deis/deis/publisher || exit 1
-	$(call check-static-binary,$(BINARY_DEST_DIR)/publisher)
+	@$(call check-static-binary,$(BINARY_DEST_DIR)/publisher)
 	docker build -t $(RELEASE_IMAGE) image
 
 clean: check-docker check-registry
@@ -66,7 +66,7 @@ test-style:
 	$(GOLINT) ./...
 
 test-unit:
-	godep go test -v ./...
+	$(GOTEST) ./...
 
 uninstall: check-deisctl
 	deisctl uninstall publisher

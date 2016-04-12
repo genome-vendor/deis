@@ -4,9 +4,11 @@ include ../includes.mk
 
 all: build run
 
+SHELL_SCRIPTS = $(wildcard bin/*) $(shell find "." -name '*.sh')
+
 COMPONENT = controller
 IMAGE = $(IMAGE_PREFIX)$(COMPONENT):$(BUILD_TAG)
-DEV_IMAGE = $(DEV_REGISTRY)/$(IMAGE)
+DEV_IMAGE = $(REGISTRY)$(IMAGE)
 
 build: check-docker
 	docker build -t $(IMAGE) .
@@ -54,7 +56,7 @@ postgres:
 	docker start postgres || docker run --restart="always" -d -p 5432:5432 --name postgres postgres:9.4.1
 	docker exec postgres createdb -U postgres deis 2>/dev/null || true
 	@echo "To use postgres for local development:"
-	@echo "    export PGHOST=`boot2docker ip 2>/dev/null || echo 127.0.0.1`"
+	@echo "    export PGHOST=`docker-machine ip $$(docker-machine active) 2>/dev/null || echo 127.0.0.1`"
 	@echo "    export PGPORT=5432"
 	@echo "    export PGUSER=postgres"
 
@@ -69,16 +71,17 @@ test: test-unit test-functional
 
 setup-venv:
 	@if [ ! -d venv ]; then virtualenv venv; fi
-	venv/bin/pip install -q -r requirements.txt -r dev_requirements.txt
+	venv/bin/pip install --disable-pip-version-check -q -r requirements.txt -r dev_requirements.txt
 
 test-style: setup-venv
-	venv/bin/flake8
+	venv/bin/flake8 --show-pep8 --show-source
+	shellcheck $(SHELL_SCRIPTS)
 
 test-unit: setup-venv test-style
-	venv/bin/coverage run manage.py test --noinput api
+	venv/bin/coverage run manage.py test --noinput web registry api
 	venv/bin/coverage report -m
 
 test-functional:
-	@docker history deis/test-etcd >/dev/null 2>&1 || docker pull deis/test-etcd:latest
-	@docker history deis/test-postgresql >/dev/null 2>&1 || docker pull deis/test-postgresql:latest
+	@$(MAKE) -C ../tests/ test-etcd
+	@$(MAKE) -C ../tests/ test-postgresql
 	GOPATH=`cd ../tests/ && godep path`:$(GOPATH) go test -v ./tests/...

@@ -3,18 +3,18 @@ include ../includes.mk
 # the filepath to this repository, relative to $GOPATH/src
 repo_path = github.com/deis/deis/logspout
 
-GO_FILES = attacher.go logspout.go routes.go types.go
+GO_FILES = $(wildcard *.go)
 GO_PACKAGES = utils
 GO_PACKAGES_REPO_PATH = $(addprefix $(repo_path)/,$(GO_PACKAGES))
 
 COMPONENT = $(notdir $(repo_path))
-DOCKER_IMAGE := deis/$(COMPONENT)
+DOCKER_IMAGE := $(IMAGE_PREFIX)$(COMPONENT)
 RELEASE_IMAGE := $(DOCKER_IMAGE):$(BUILD_TAG)
-DEV_DOCKER_IMAGE := $(DEV_REGISTRY)/$(RELEASE_IMAGE)
+DEV_DOCKER_IMAGE := $(REGISTRY)$(RELEASE_IMAGE)
 
 build: check-docker
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 godep go build -a -installsuffix cgo -ldflags '-s' -o image/logspout
-	$(call check-static-binary,image/logspout)
+	@$(call check-static-binary,image/logspout)
 	docker build -t $(RELEASE_IMAGE) image
 
 clean:
@@ -54,14 +54,6 @@ release:
 	docker push $(RELEASE_IMAGE)
 
 deploy: build dev-release restart
-
-setup-root-gotools:
-	sudo GOPATH=/tmp/tmpGOPATH go get -u -v code.google.com/p/go.tools/cmd/cover
-	sudo GOPATH=/tmp/tmpGOPATH go get -u -v code.google.com/p/go.tools/cmd/vet
-	sudo rm -rf /tmp/tmpGOPATH
-
-setup-gotools:
-	go get -v github.com/golang/lint/golint
 
 test: test-style test-unit test-functional
 

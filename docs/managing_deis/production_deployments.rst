@@ -9,6 +9,30 @@ Production deployments
 Many Deis users are running Deis quite successfully in production. When readying a Deis deployment
 for production workloads, there are some additional (but optional) recommendations.
 
+Isolating the Planes
+--------------------
+
+.. include:: ../_includes/_isolating-planes-description.rst
+
+See :ref:`isolating-planes` for further details.
+
+Isolating etcd
+--------------
+
+.. include:: ../_includes/_isolating-etcd-description.rst
+
+See :ref:`isolating-etcd` for further details.
+
+Running Deis without Ceph
+-------------------------
+
+.. include:: ../_includes/_ceph-dependency-description.rst
+
+See :ref:`running-deis-without-ceph` for details on removing this operational
+complexity.
+
+.. _preseeding_continers:
+
 Preseeding containers
 ---------------------
 
@@ -44,6 +68,15 @@ Back up data
 ------------
 
 Backing up data regularly is recommended. See :ref:`backing_up_data` for steps.
+
+Change Registration Mode
+------------------------
+
+Changing the registration process is highly recommended in production.  By default, registrations for a
+new cluster are open to anyone with the proper URL.  Once the admin user has registered with a new cluster,
+it is recommended that you either turn off registrations entirely or enable the admin only registration feature.
+
+Please see the following documentation:  :ref:`controller_settings`
 
 Configure logging and monitoring
 --------------------------------

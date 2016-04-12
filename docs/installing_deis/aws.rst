@@ -8,9 +8,9 @@ Amazon AWS
 
 In this tutorial, we will show you how to set up your own 3-node cluster on Amazon Web Services.
 
-Please :ref:`get the source <get_the_source>` and refer to the scripts in `contrib/ec2`_
-while following this documentation.
-
+Please :ref:`get the source <get_the_source>` and refer to the scripts in `contrib/aws`_
+while following this documentation. You will also need to :ref:`install_deisctl` since the
+``deisctl`` command-line utility is used by the provisioning script.
 
 Install the AWS Command Line Interface
 --------------------------------------
@@ -21,7 +21,7 @@ In order to start working with Amazon's API, let's install `awscli`_:
 
     $ pip install awscli
 
-We'll also need `PyYAML`_ for the Deis EC2 provision script to run:
+We'll also need `PyYAML`_ for the Deis AWS provision script to run:
 
 .. code-block:: console
 
@@ -53,6 +53,13 @@ Generate and upload a new keypair to AWS, ensuring that the name of the keypair 
     $ aws ec2 import-key-pair --key-name deis --public-key-material file://~/.ssh/deis.pub
 
 
+During installation, ``deisctl`` will make an SSH connection to the cluster.
+It will need to be able to use this key to connect.
+
+Most users use SSH agent (``ssh-agent``). If this is the case, run
+``ssh-add ~/.ssh/deis`` to add the key. Otherwise, you may prefer to
+modify ``~/.ssh/config`` to add the key to the IPs in AWS.
+
 Choose Number of Instances
 --------------------------
 
@@ -63,10 +70,7 @@ By default, the script will provision 3 servers. You can override this by settin
 
     $ export DEIS_NUM_INSTANCES=5
 
-Note that for scheduling to work properly, clusters must consist of at least 3 nodes and always
-have an odd number of members. For more information, see `etcd disaster recovery`_.
-
-Deis clusters of less than 3 nodes are unsupported.
+A Deis cluster must have 3 or more nodes. See :ref:`cluster-size` for more details.
 
 
 Generate a New Discovery URL
@@ -78,8 +82,12 @@ Generate a New Discovery URL
 Customize cloudformation.json
 -----------------------------
 
-Any of the parameter defaults defined in deis.template.json can be overridden by setting the value
-in `cloudformation.json`_. For example, to configure all of the optional settings:
+The configuration files and templates for AWS are located in the directory
+``contrib/aws/`` in the Deis repository.
+
+Any of the parameter defaults defined in ``deis.template.json`` can be
+overridden by setting the value in `cloudformation.json`_. For example, to
+configure all of the options to non-default values:
 
 .. code-block:: console
 
@@ -102,16 +110,29 @@ in `cloudformation.json`_. For example, to configure all of the optional setting
     {
         "ParameterKey":     "ELBScheme",
         "ParameterValue":   "internal"
+    },
+    {
+        "ParameterKey":     "RootVolumeSize",
+        "ParameterValue":   "100"
+    },
+    {
+        "ParameterKey":     "DockerVolumeSize",
+        "ParameterValue":   "1000"
+    },
+    {
+        "ParameterKey":     "EtcdVolumeSize",
+        "ParameterValue":   "5"
     }
 
 
 The only entry in cloudformation.json required to launch your cluster is `KeyPair`, which is
-already filled out. The defaults will be applied for the other settings.
+already filled out. The defaults will be applied for the other settings. The default values are
+defined in ``deis.template.json``.
 
-If updated with update-ec2-cluster.sh, the InstanceType will only impact newly deployed instances
+If updated with ``update-aws-cluster.sh``, the InstanceType will only impact newly deployed instances
 (`#1758`_).
 
-NOTE: The smallest recommended instance size is `large`. Having not enough CPU or RAM will result
+NOTE: The smallest recommended instance size is ``large``. Having not enough CPU or RAM will result
 in numerous issues when using the cluster.
 
 
@@ -165,8 +186,8 @@ Run the cloudformation provision script to spawn a new CoreOS cluster:
 
 .. code-block:: console
 
-    $ cd contrib/ec2
-    $ ./provision-ec2-cluster.sh
+    $ cd contrib/aws
+    $ ./provision-aws-cluster.sh
     Creating CloudFormation stack deis
     {
         "StackId": "arn:aws:cloudformation:us-east-1:69326027886:stack/deis/1e9916b0-d7ea-11e4-a0be-50d2020578e0"
@@ -187,7 +208,7 @@ Run the cloudformation provision script to spawn a new CoreOS cluster:
 .. note::
 
     The default name of the CloudFormation stack will be ``deis``. You can specify a different name
-    with ``./provision-ec2-cluster.sh <name>``.
+    with ``./provision-aws-cluster.sh <name>``.
 
 Remote IPs behind your ELB
 --------------------------
@@ -200,6 +221,10 @@ were created with `Proxy Protocol`_ enabled.
 Configure DNS
 -------------
 
+You will need a DNS entry that points to the ELB instance created above. Find
+the ELB name in the AWS web console or by running ``aws elb describe-load-balancers``
+and finding the Deis ELB.
+
 See :ref:`configure-dns` for more information on properly setting up your DNS records with Deis.
 
 
@@ -209,11 +234,30 @@ Install Deis Platform
 Now that you've finished provisioning a cluster, please refer to :ref:`install_deis_platform` to
 start installing the platform.
 
+In case of failures
+-------------------
+
+Though it is uncommon, provisioning may fail for a few reasons. In these cases,
+``provision-aws-cluster.sh`` will automatically attempt to rollback its changes.
+
+If it fails to do so, you can clean up the AWS resources manually. Do this by logging into the AWS
+console, and under CloudFormation, simply delete the ``deis`` stack it created.
+
+If you wish to retry, you'll need to take note of a few caveats:
+
+- The ``deis`` CloudFormation stack may be in the process of being deleted. In this case, you can't
+  provision another CloudFormation stack with the same name. You can simply wait for the stack to
+  clean itself up, or provision a stack under a different name by doing ``./provision-aws-cluster.sh
+  <newname>``.
+
+- In most cases, it's not a good idea to re-use the same discovery URL of a failed provisioning.
+  Generate a new discovery URL before attempting to provision a new stack.
+
 CloudFormation Updates
 ----------------------
 
 To use CloudFormation to perform update operations to your stack, there is another script:
-`update_ec2_cluster.sh`_. Depending on the parameters that you have changed, CloudFormation
+`update-aws-cluster.sh`_. Depending on the parameters that you have changed, CloudFormation
 may replace the EC2 instances in your stack.
 
 The following parameters can be changed without replacing all instances in a stack:
@@ -229,11 +273,11 @@ Please reference the AWS documentation for `more information about CloudFormatio
 
 .. _`#1758`: https://github.com/deis/deis/issues/1758
 .. _`awscli`: https://github.com/aws/aws-cli
-.. _`contrib/ec2`: https://github.com/deis/deis/tree/master/contrib/ec2
-.. _`cloudformation.json`: https://github.com/deis/deis/blob/master/contrib/ec2/cloudformation.json
+.. _`contrib/aws`: https://github.com/deis/deis/tree/master/contrib/aws
+.. _`cloudformation.json`: https://github.com/deis/deis/blob/master/contrib/aws/cloudformation.json
 .. _`etcd`: https://github.com/coreos/etcd
 .. _`etcd disaster recovery`: https://github.com/coreos/etcd/blob/master/Documentation/admin_guide.md#disaster-recovery
 .. _`PyYAML`: http://pyyaml.org/
-.. _`update_ec2_cluster.sh`: https://github.com/deis/deis/blob/master/contrib/ec2/update-ec2-cluster.sh
+.. _`update-aws-cluster.sh`: https://github.com/deis/deis/blob/master/contrib/aws/update-aws-cluster.sh
 .. _`More information about CloudFormation stack updates`: http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks.html
 .. _`Proxy Protocol`: http://docs.aws.amazon.com/ElasticLoadBalancing/latest/DeveloperGuide/enable-proxy-protocol.html

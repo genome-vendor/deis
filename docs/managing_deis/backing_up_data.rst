@@ -56,6 +56,12 @@ Vagrant setup, I've changed the lines to:
 
 We can now use ``s3cmd`` to back up and restore data from the store-gateway.
 
+.. note::
+
+    Some users have reported that the data transferred in this process can overwhelm the gateway
+    component, and that scaling up to multiple gateways with ``deisctl scale`` before both the backup
+    and restore alleviates this issue.
+
 Backing up
 ----------
 
@@ -191,25 +197,18 @@ Finishing up
 
 Now that the data is restored, the rest of the cluster should come up normally with a ``deisctl start platform``.
 
-The last task is to instruct the controller to re-write user keys, application data, and domains to etcd.
-Log into the machine which runs deis-controller and run the following. Note that the IP address to
-use in the ``export`` command should correspond to the IP of the host machine which runs this container.
-
-.. code-block:: console
-
-    $ nse deis-controller
-    $ cd /app
-    $ export ETCD=172.17.8.100:4001
-    ./manage.py shell <<EOF
-    from api.models import *
-    [k.save() for k in Key.objects.all()]
-    [a.save() for a in App.objects.all()]
-    [d.save() for d in Domain.objects.all()]
-    EOF
-    $ exit
+The controller will automatically re-write user keys, application data, and domains from the
+restored database to etcd.
 
 That's it! The cluster should be fully restored.
 
+Tools
+-----
+
+Various community members have developed tools to assist in automating the backup and restore process outlined above.
+Information on the tools can be found on the `Community Contributions`_ page.
+
 .. _`Ceph`: http://ceph.com
 .. _`download s3cmd`: http://s3tools.org/download
+.. _`Community Contributions`: https://github.com/deis/deis/blob/master/contrib/README.md#backup-tools
 .. _`s3cmd`: http://s3tools.org/

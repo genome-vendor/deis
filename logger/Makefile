@@ -3,19 +3,19 @@ include ../includes.mk
 # the filepath to this repository, relative to $GOPATH/src
 repo_path = github.com/deis/deis/logger
 
-GO_FILES = main.go
-GO_PACKAGES = syslog syslogd tests
+GO_FILES = $(wildcard *.go)
+GO_PACKAGES = configurer drain publisher storage syslogish tests weblog
 GO_PACKAGES_REPO_PATH = $(addprefix $(repo_path)/,$(GO_PACKAGES))
-GO_TESTABLE_PACKAGES_REPO_PATH = $(addprefix $(repo_path)/,syslog syslogd)
+GO_TESTABLE_PACKAGES_REPO_PATH = $(addprefix $(repo_path)/,drain drain/simple storage storage/file storage/ringbuffer)
 
 COMPONENT = $(notdir $(repo_path))
 IMAGE = $(IMAGE_PREFIX)$(COMPONENT):$(BUILD_TAG)
-DEV_IMAGE = $(DEV_REGISTRY)/$(IMAGE)
+DEV_IMAGE = $(REGISTRY)$(IMAGE)
 BINARY_DEST_DIR = image/bin
 
 build: check-docker
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 godep go build -a -installsuffix cgo -ldflags '-s' -o $(BINARY_DEST_DIR)/logger github.com/deis/deis/logger || exit 1
-	$(call check-static-binary,$(BINARY_DEST_DIR)/logger)
+	@$(call check-static-binary,$(BINARY_DEST_DIR)/logger)
 	docker build -t $(IMAGE) image
 
 clean: check-docker check-registry
@@ -55,18 +55,10 @@ release:
 
 deploy: build dev-release restart
 
-setup-root-gotools:
-	sudo GOPATH=/tmp/tmpGOPATH go get -u -v code.google.com/p/go.tools/cmd/cover
-	sudo GOPATH=/tmp/tmpGOPATH go get -u -v code.google.com/p/go.tools/cmd/vet
-	sudo rm -rf /tmp/tmpGOPATH
-
-setup-gotools:
-	go get -v github.com/golang/lint/golint
-
 test: test-style test-unit test-functional
 
 test-functional:
-	@docker history deis/test-etcd >/dev/null 2>&1 || docker pull deis/test-etcd:latest
+	@$(MAKE) -C ../tests/ test-etcd
 	GOPATH=`cd ../tests/ && godep path`:$(GOPATH) go test -v ./tests/...
 
 test-style:

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Preps a test environment and runs `make test-integration`
 # against artifacts produced from the current source tree
@@ -56,7 +56,6 @@ function set_release {
   deisctl config $1 set image=deis/$1:$2
 }
 set_release logger ${OLD_TAG}
-set_release cache ${OLD_TAG}
 set_release router ${OLD_TAG}
 set_release database ${OLD_TAG}
 set_release controller ${OLD_TAG}
@@ -101,6 +100,6 @@ wait_for_update deis-3 &
 update3=$!
 wait update1 update2 update3
 
-log_phase "Running end-to-end integration test"
+log_phase "Running end-to-end integration test with Python client"
 
 time make test-integration

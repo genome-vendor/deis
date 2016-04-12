@@ -1,8 +1,5 @@
 # Deis controller requirements
 #
-# NOTE: For testing on Mac OS X Mavericks, use the following to work around a clang issue:
-# ARCHFLAGS=-Wno-error=unused-command-line-argument-hard-error-in-future pip install [args]
-#
 Django==1.6.11
 django-cors-headers==1.0.0
 # required for south migrations
@@ -11,13 +8,14 @@ django-guardian==1.2.5
 django-json-field==0.5.7
 django-auth-ldap==1.2.5
 djangorestframework==3.0.5
-docker-py==1.1.0
+docker-py==1.7.2
 gunicorn==19.3.0
 paramiko==1.15.2
-psycopg2==2.6
+psycopg2==2.6.1
 python-etcd==0.3.2
-PyYAML==3.11
-setproctitle==1.1.8
-static==1.1.1
-South==1.0.2
 python-ldap==2.4.19
+PyYAML==3.11
+semantic_version==2.4.2
+simpleflock==0.0.3
+South==1.0.2
+static==1.1.1

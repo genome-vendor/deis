@@ -8,15 +8,21 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	"code.google.com/p/go.net/websocket"
 	"github.com/coreos/go-etcd/etcd"
 	dtime "github.com/deis/deis/pkg/time"
 	"github.com/fsouza/go-dockerclient"
 	"github.com/go-martini/martini"
+	"golang.org/x/net/websocket"
+)
+
+const (
+	MAX_UDP_MSG_BYTES = 65507
+	MAX_TCP_MSG_BYTES = 1048576
 )
 
 var debugMode bool
@@ -63,36 +69,71 @@ func syslogStreamer(target Target, types []string, logstream chan *Log) {
 		if typestr != ",," && !strings.Contains(typestr, logline.Type) {
 			continue
 		}
-		tag, pid := getLogName(logline.Name)
-		addr, err := net.ResolveUDPAddr("udp", target.Addr)
-		assert(err, "syslog")
-		conn, err := net.DialUDP("udp", nil, addr)
-		assert(err, "syslog")
-		// bump up the packet size for large log lines
-		assert(conn.SetWriteBuffer(1048576), "syslog")
+		tag, pid, data := getLogParts(logline)
+
 		// HACK: Go's syslog package hardcodes the log format, so let's send our own message
-		_, err = fmt.Fprintf(conn,
-			"%s %s[%s]: %s",
+		data = fmt.Sprintf("%s %s[%s]: %s",
 			time.Now().Format(getopt("DATETIME_FORMAT", dtime.DeisDatetimeFormat)),
 			tag,
 			pid,
-			logline.Data)
-		assert(err, "syslog")
+			data)
+
+		if strings.EqualFold(target.Protocol, "tcp") {
+			addr, err := net.ResolveTCPAddr("tcp", target.Addr)
+			assert(err, "syslog")
+			conn, err := net.DialTCP("tcp", nil, addr)
+			assert(err, "syslog")
+			assert(conn.SetWriteBuffer(MAX_TCP_MSG_BYTES), "syslog")
+			_, err = fmt.Fprintln(conn, data)
+			assert(err, "syslog")
+		} else if strings.EqualFold(target.Protocol, "udp") {
+			// Truncate the message if it's too long to fit in a single UDP packet.
+			// Get the bytes first.  If the string has non-UTF8 chars, the number of
+			// bytes might exceed the number of characters and it would be good to
+			// know that up front.
+			dataBytes := []byte(data)
+			if len(dataBytes) > MAX_UDP_MSG_BYTES {
+				// Truncate the bytes and add ellipses.
+				dataBytes = append(dataBytes[:MAX_UDP_MSG_BYTES-3], "..."...)
+			}
+			addr, err := net.ResolveUDPAddr("udp", target.Addr)
+			assert(err, "syslog")
+			conn, err := net.DialUDP("udp", nil, addr)
+			assert(err, "syslog")
+			assert(conn.SetWriteBuffer(MAX_UDP_MSG_BYTES), "syslog")
+			_, err = conn.Write(dataBytes)
+			assert(err, "syslog")
+		} else {
+			assert(fmt.Errorf("%s is not a supported protocol, use either udp or tcp", target.Protocol), "syslog")
+		}
 	}
 }
 
-// getLogName returns a custom tag and PID for containers that
+// getLogParts returns a custom tag and PID for containers that
 // match Deis' specific application name format. Otherwise,
-// it returns the original name and 1 as the PID.
-func getLogName(name string) (string, string) {
+// it returns the original name and 1 as the PID.  Additionally,
+// it returns log data.  The function is also smart enough to
+// detect when a leading tag in the log data represents an attempt
+// by the controller to log an application event.
+func getLogParts(logline *Log) (string, string, string) {
 	// example regex that should match: go_v2.web.1
-	r := regexp.MustCompile(`(^[a-z0-9-]+)_(v[0-9]+)\.([a-z-_]+\.[0-9]+)$`)
-	match := r.FindStringSubmatch(name)
-	if match == nil {
-		return name, "1"
-	} else {
-		return match[1], match[3]
+	match := getMatch(`(^[a-z0-9-]+)_(v[0-9]+)\.([a-z-_]+\.[0-9]+)$`, logline.Name)
+	if match != nil {
+		return match[1], match[3], logline.Data
 	}
+	if logline.Name == "deis-controller" {
+		data_match := getMatch(`^[A-Z]+ \[([a-z0-9-]+)\]: (.*)`, logline.Data)
+		if data_match != nil {
+			return data_match[1], "deis-controller", data_match[2]
+		}
+	}
+	return logline.Name, "1", logline.Data
+}
+
+func getMatch(regex string, name string) []string {
+	r := regexp.MustCompile(regex)
+	match := r.FindStringSubmatch(name)
+	return match
 }
 
 func websocketStreamer(w http.ResponseWriter, req *http.Request, logstream chan *Log, closer chan bool) {
@@ -153,7 +194,30 @@ func httpStreamer(w http.ResponseWriter, req *http.Request, logstream chan *Log,
 	}
 }
 
+func getEtcdValueOrDefault(c *etcd.Client, key string, defaultValue string) string {
+	resp, err := c.Get(key, false, false)
+	if err != nil {
+		if strings.Contains(fmt.Sprintf("%v", err), "Key not found") {
+			return defaultValue
+		}
+		assert(err, "url")
+	}
+	return resp.Node.Value
+}
+
+func getEtcdRoute(client *etcd.Client) *Route {
+	hostResp, err := client.Get("/deis/logs/host", false, false)
+	assert(err, "url")
+	portResp, err := client.Get("/deis/logs/port", false, false)
+	assert(err, "url")
+	protocol := getEtcdValueOrDefault(client, "/deis/logs/protocol", "udp")
+	host := fmt.Sprintf("%s:%s", hostResp.Node.Value, portResp.Node.Value)
+	log.Printf("routing all to %s://%s", protocol, host)
+	return &Route{ID: "etcd", Target: Target{Type: "syslog", Addr: host, Protocol: protocol}}
+}
+
 func main() {
+	runtime.GOMAXPROCS(1)
 	debugMode = getopt("DEBUG", "") != ""
 	port := getopt("PORT", "8000")
 	endpoint := getopt("DOCKER_HOST", "unix:///var/run/docker.sock")
@@ -171,13 +235,26 @@ func main() {
 		debug("etcd:", connectionString[0])
 		etcd := etcd.NewClient(connectionString)
 		etcd.SetDialTimeout(3 * time.Second)
-		hostResp, err := etcd.Get("/deis/logs/host", false, false)
-		assert(err, "url")
-		portResp, err := etcd.Get("/deis/logs/port", false, false)
-		assert(err, "url")
-		host := fmt.Sprintf("%s:%s", hostResp.Node.Value, portResp.Node.Value)
-		log.Println("routing all to " + host)
-		router.Add(&Route{Target: Target{Type: "syslog", Addr: host}})
+		router.Add(getEtcdRoute(etcd))
+		go func() {
+			for {
+				// NOTE(bacongobbler): sleep for a bit before doing the discovery loop again
+				time.Sleep(10 * time.Second)
+				newRoute := getEtcdRoute(etcd)
+				oldRoute, err := router.Get(newRoute.ID)
+				// router.Get only returns an error if the route doesn't exist. If it does,
+				// then we can skip this check and just add the new route to the routing table
+				if err == nil &&
+					newRoute.Target.Protocol == oldRoute.Target.Protocol &&
+					newRoute.Target.Addr == oldRoute.Target.Addr {
+					// NOTE(bacongobbler): the two targets are the same; perform a no-op
+					continue
+				}
+				// NOTE(bacongobbler): this operation is a no-op if the route doesn't exist
+				router.Remove(oldRoute.ID)
+				router.Add(newRoute)
+			}
+		}()
 	}
 
 	if len(os.Args) > 1 {

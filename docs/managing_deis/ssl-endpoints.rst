@@ -22,18 +22,23 @@ Installing SSL on a Load Balancer
 ---------------------------------
 
 On most cloud-based load balancers, you can install a SSL certificate onto the load balancer
-itself. This is the recommended way of enabling SSL onto a cluster, as any communication inbound to
-the cluster will be encrypted while the internal components of Deis will still communicate over
-HTTP.
+itself. Any communication inbound to the cluster will be encrypted while the internal components
+of Deis will still communicate over HTTP.
+
+.. note::
+
+    On AWS, Deis enables the :ref:`PROXY protocol <proxy_protocol>` by default, requiring
+    installation of :ref:`SSL on the Deis routers <router_ssl>`, as described below.
+    Disable the PROXY protocol with ``deisctl config router rm proxyProtocol`` and change
+    existing targets and health checks from TCP to HTTP to terminate SSL connections at an
+    Amazon ELB instead.
 
 To enable SSL, you will need to open port 443 on the load balancer and forward it to port 80 on the
-routers. For EC2, you'll also need to add port 443 in the security group settings for your load
+routers. For AWS, you'll also need to add port 443 in the security group settings for your load
 balancer.
 
-See your vendor's specific instructions on installing SSL on your load balancer. For EC2, see their
-documentation on `installing an SSL cert for load balancing`_. For Rackspace, see their
-`Product FAQ`_.
-
+See your vendor's specific instructions on installing SSL on your load balancer. For AWS, see their
+documentation on `installing an SSL cert for load balancing`_.
 
 .. _router_ssl:
 
@@ -69,4 +74,3 @@ This is achieved with ``deisctl``:
 
 
 .. _`installing an SSL cert for load balancing`: http://docs.aws.amazon.com/ElasticLoadBalancing/latest/DeveloperGuide/ssl-server-cert.html
-.. _`Product FAQ`: http://www.rackspace.com/knowledge_center/product-faq/cloud-load-balancers

@@ -11,11 +11,13 @@ import json
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.test import TransactionTestCase
+import mock
 from rest_framework.authtoken.models import Token
 
 from scheduler import chaos
 
 
+@mock.patch('api.models.publish_release', lambda *args: None)
 class SchedulerTest(TransactionTestCase):
     """Tests creation of containers on nodes"""
 
@@ -75,10 +77,7 @@ class SchedulerTest(TransactionTestCase):
         url = "/v1/apps/{app_id}/containers".format(**locals())
         response = self.client.get(url, HTTP_AUTHORIZATION='token {}'.format(self.token))
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data['results']), 20)
-        # make sure some failed
-        states = set([c['state'] for c in response.data['results']])
-        self.assertEqual(states, set(['error', 'created']))
+        self.assertEqual(len(response.data['results']), 0)
 
     def test_start_chaos(self):
         url = '/v1/apps'
@@ -232,7 +231,7 @@ class SchedulerTest(TransactionTestCase):
         self.assertEqual(states, set(['error']))
         # make sure we can cleanup after enough tries
         containers = 20
-        for _ in range(100):
+        for _ in xrange(100):
             url = "/v1/apps/{app_id}/scale".format(**locals())
             body = {'web': 0}
             response = self.client.post(url, json.dumps(body), content_type='application/json',
@@ -304,7 +303,6 @@ class SchedulerTest(TransactionTestCase):
         response = self.client.get(url, HTTP_AUTHORIZATION='token {}'.format(self.token))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data['results']), 20)
-
         # make sure all old containers are still up
         states = set([c['state'] for c in response.data['results']])
         self.assertEqual(states, set(['up']))
